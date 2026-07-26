@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Statistik — DänceBahnTracker</title>
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101319" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="appbar">
+  <div>
+    <h1 class="appbar-title">Statistik</h1>
+    <div class="appbar-sub" id="appbarSub">wird geladen…</div>
+  </div>
+</header>
+
+<main class="container" id="main">
+
+  <!-- Filled by js/stats.js. Empty state replaces everything below the controls
+       when there are no logged entries at all. -->
+
+  <section class="section" id="emptySection" hidden>
+    <div class="card card-pad">
+      <div class="empty">
+        <span class="empty-icon" aria-hidden="true">📊</span>
+        <div class="empty-title">Noch keine Fahrten erfasst</div>
+        <p class="empty-text">
+          Sobald du auf der Seite „Fahrten“ deine ersten Verspätungen loggst,
+          erscheinen hier deine Auswertungen.
+        </p>
+        <div class="btn-row" style="margin-top:14px;">
+          <a class="btn btn--primary btn--block" href="index.html">Zu den Fahrten</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="statsContent">
+
+    <section class="section" id="controlsSection">
+      <div class="section-title">Zeitraum &amp; Gruppierung</div>
+      <div class="card card-pad" style="display:flex; flex-direction:column; gap:14px;">
+
+        <div class="field" style="margin-bottom:0;">
+          <div class="label">Gruppieren nach</div>
+          <div class="segmented" id="groupingControl" role="group" aria-label="Gruppierung">
+            <button type="button" data-value="day">Tag</button>
+            <button type="button" data-value="week">Woche</button>
+            <button type="button" data-value="month">Monat</button>
+            <button type="button" data-value="year">Jahr</button>
+          </div>
+        </div>
+
+        <div class="field" style="margin-bottom:0;">
+          <div class="label">Zeitraum</div>
+          <div class="chips" id="rangeControl" role="group" aria-label="Zeitraum"></div>
+        </div>
+
+        <div class="field" style="margin-bottom:0;">
+          <div class="label">Richtung</div>
+          <div class="segmented" id="directionControl" role="group" aria-label="Richtung">
+            <button type="button" data-value="ALL">Beide</button>
+            <button type="button" data-value="RO_MU">→ München</button>
+            <button type="button" data-value="MU_RO">→ Rosenheim</button>
+          </div>
+        </div>
+
+        <div class="field" style="margin-bottom:0;">
+          <div class="label">Kennzahl im Diagramm</div>
+          <div class="chips" id="metricControl" role="group" aria-label="Kennzahl"></div>
+        </div>
+
+        <div class="field" style="margin-bottom:0;">
+          <div class="label">Ausgefallene Fahrten</div>
+          <div class="segmented" id="cancelledControl" role="group" aria-label="Ausgefallene Fahrten">
+            <button type="button" data-value="include">mitzählen</button>
+            <button type="button" data-value="exclude">ausblenden</button>
+          </div>
+          <p class="hint" id="cancelledHint"></p>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="section" id="kpiSection">
+      <div class="section-title">Kennzahlen</div>
+      <div class="stat-grid" id="kpiGrid"></div>
+    </section>
+
+    <section class="section" id="chartSection">
+      <div class="section-title" id="chartTitle">Verlauf</div>
+      <div class="card card-pad">
+        <div class="bar-chart" id="periodChart"></div>
+        <p class="hint" id="periodChartHint"></p>
+      </div>
+    </section>
+
+    <section class="section" id="histogramSection">
+      <div class="section-title">Verspätungsverteilung (Ankunft)</div>
+      <div class="card card-pad">
+        <div class="bar-chart" id="histogramChart"></div>
+      </div>
+    </section>
+
+    <section class="section" id="directionSection">
+      <div class="section-title">Nach Richtung</div>
+      <div class="card card-pad">
+        <div class="bar-chart" id="directionChart"></div>
+      </div>
+    </section>
+
+    <section class="section" id="worstSection">
+      <div class="section-title">Häufig verspätete Verbindungen</div>
+      <div class="card">
+        <div style="overflow-x:auto;">
+          <table class="table" id="worstTable">
+            <thead>
+              <tr>
+                <th>Zug</th>
+                <th>Richtung</th>
+                <th class="num">Fahrten</th>
+                <th class="num">Ø Versp.</th>
+              </tr>
+            </thead>
+            <tbody id="worstTableBody"></tbody>
+          </table>
+        </div>
+        <p class="hint card-pad" id="worstHint" style="margin:0;"></p>
+      </div>
+    </section>
+
+    <section class="section" id="tripsSection">
+      <div class="section-title">Einzelne Fahrten</div>
+      <div class="card">
+        <div style="overflow-x:auto;">
+          <table class="table" id="tripsTable">
+            <thead>
+              <tr>
+                <th>Datum</th>
+                <th>Richtung</th>
+                <th>Zug</th>
+                <th>Abfahrt</th>
+                <th class="num">Versp.</th>
+                <th class="num">Reisezeit</th>
+                <th>Notiz</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tripsTableBody"></tbody>
+          </table>
+        </div>
+        <p class="hint card-pad" id="tripsEmptyHint" style="margin:0; display:none;">
+          Keine Fahrten im gewählten Zeitraum.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" id="dataSection">
+      <div class="section-title">Daten</div>
+      <div class="card card-pad" style="display:flex; flex-direction:column; gap:10px;">
+        <div class="btn-row">
+          <button type="button" class="btn" id="exportBtn">Exportieren</button>
+          <button type="button" class="btn" id="importBtn">Importieren</button>
+        </div>
+        <input type="file" id="importFile" accept="application/json,.json" class="sr-only">
+        <button type="button" class="btn btn--danger btn--block" id="clearBtn">Alle Daten löschen</button>
+        <p class="hint" id="dataHint" style="margin:0;"></p>
+      </div>
+    </section>
+
+  </div>
+
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<nav class="tabbar">
+  <a class="tab" href="index.html">
+    <span class="tab-icon" aria-hidden="true">🚆</span>
+    <span>Fahrten</span>
+  </a>
+  <a class="tab is-active" href="stats.html" aria-current="page">
+    <span class="tab-icon" aria-hidden="true">📊</span>
+    <span>Statistik</span>
+  </a>
+</nav>
+
+<script type="module" src="js/stats.js"></script>
+</body>
+</html>

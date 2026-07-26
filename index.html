@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fahrten — DänceBahnTracker</title>
+<meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101319" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="appbar">
+  <div>
+    <h1 class="appbar-title">DänceBahnTracker</h1>
+    <div class="appbar-sub" id="freshness">wird geladen…</div>
+  </div>
+  <button type="button" class="icon-btn" id="refreshBtn" aria-label="Aktualisieren">⟳</button>
+</header>
+
+<main class="container" id="main">
+
+  <section class="section" id="filterSection">
+    <div class="segmented" id="directionControl" role="group" aria-label="Richtung">
+      <button type="button" data-value="ALL" class="is-active">Beide</button>
+      <button type="button" data-value="RO_MU">→ München</button>
+      <button type="button" data-value="MU_RO">→ Rosenheim</button>
+    </div>
+  </section>
+
+  <div class="notice" id="notice" hidden style="display:none">
+    <span aria-hidden="true">⚠️</span>
+    <span id="noticeText"></span>
+  </div>
+
+  <div id="skeletonWrap">
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+  </div>
+
+  <div class="empty" id="emptyState" hidden>
+    <span class="empty-icon" aria-hidden="true">🚆</span>
+    <div class="empty-title">Keine Fahrten im Zeitfenster</div>
+    <p class="empty-text">
+      Aktuell liegen keine Züge innerhalb der nächsten bzw. letzten 2 Stunden vor.
+      Zieh zum Aktualisieren oder komm später wieder.
+    </p>
+  </div>
+
+  <div id="trainListRoot"></div>
+
+</main>
+
+<!-- Delay entry sheet. Populated and shown/hidden by js/tracker.js. -->
+<div class="sheet" id="entrySheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <button type="button" class="sheet-backdrop" id="sheetBackdrop" aria-label="Schließen"></button>
+  <div class="sheet-panel" id="sheetPanel" tabindex="-1">
+    <div class="sheet-grabber" aria-hidden="true"></div>
+    <h2 class="sheet-title" id="sheetTitle">Zug</h2>
+    <p class="sheet-sub" id="sheetSub"></p>
+
+    <div class="field">
+      <div class="label" id="arrivalLabel">Ankunftsverspätung (Minuten)</div>
+      <div class="stepper">
+        <button type="button" id="arrMinus" aria-label="Minus 1 Minute">−</button>
+        <input class="input" type="number" inputmode="numeric" id="arrInput" value="0" aria-labelledby="arrivalLabel">
+        <button type="button" id="arrPlus" aria-label="Plus 1 Minute">+</button>
+      </div>
+      <div class="chips" id="arrChips" role="group" aria-label="Schnellauswahl Ankunftsverspätung"></div>
+    </div>
+
+    <button type="button" class="btn btn--ghost btn--block" id="detailsToggle" aria-expanded="false" aria-controls="departureField">
+      Details (Abfahrtsverspätung) ▾
+    </button>
+
+    <div class="field" id="departureField" hidden style="margin-top:14px;">
+      <div class="label" id="departureLabel">Abfahrtsverspätung (Minuten)</div>
+      <div class="stepper">
+        <button type="button" id="depMinus" aria-label="Minus 1 Minute">−</button>
+        <input class="input" type="number" inputmode="numeric" id="depInput" value="0" aria-labelledby="departureLabel">
+        <button type="button" id="depPlus" aria-label="Plus 1 Minute">+</button>
+      </div>
+    </div>
+
+    <div class="field" style="margin-top:14px;">
+      <label class="checkline">
+        <input type="checkbox" id="cancelledCheckbox">
+        Zug ist ausgefallen
+      </label>
+    </div>
+
+    <div class="field">
+      <label class="label" for="noteTextarea">Notiz</label>
+      <textarea class="textarea" id="noteTextarea" placeholder="Optional…"></textarea>
+    </div>
+
+    <div class="card card-pad" id="previewCard">
+      <p class="hint" id="previewText" style="margin:0;">…</p>
+    </div>
+
+    <div class="btn-row" style="margin-top:14px;">
+      <button type="button" class="btn btn--ghost" id="cancelBtn">Abbrechen</button>
+      <button type="button" class="btn btn--primary" id="saveBtn">Speichern</button>
+    </div>
+    <button type="button" class="btn btn--danger btn--block" id="deleteBtn" hidden style="margin-top:10px;">Löschen</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<nav class="tabbar">
+  <a class="tab is-active" href="index.html" aria-current="page">
+    <span class="tab-icon" aria-hidden="true">🚆</span>
+    <span>Fahrten</span>
+  </a>
+  <a class="tab" href="stats.html">
+    <span class="tab-icon" aria-hidden="true">📊</span>
+    <span>Statistik</span>
+  </a>
+</nav>
+
+<script type="module" src="js/tracker.js"></script>
+</body>
+</html>
