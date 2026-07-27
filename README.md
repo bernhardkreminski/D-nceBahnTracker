@@ -43,11 +43,96 @@ Both live services are free community projects without an SLA, so the fallback
 chain matters in practice. When anything below tier 1 is in use, the page shows
 a notice explaining what is degraded.
 
-## Storage
+## Storage and sync
 
-Logged trips live in `localStorage` under `dbt.entries.v1` (stats preferences
-under `dbt.stats.prefs.v1`). Nothing is sent to a server — the data stays in the
-browser, so it is per-device. Use Export/Import on the statistics page to move it.
+Logged trips live in `localStorage` and that stays the write path and the source
+of truth for rendering — logging a trip never waits on the network, so the app
+works on a train with no reception.
+
+| Key | Contents |
+| --- | --- |
+| `dbt.entries.v1` | the logged trips |
+| `dbt.deleted.v1` | tombstones (id → deletion time), so a delete survives a sync |
+| `dbt.dirty.v1` | ids not yet pushed to the server |
+| `dbt.stats.prefs.v1` | statistics page settings |
+| `dbt.sync.v1` | last sync time and the incremental pull cursor |
+| `dbt.auth.v1` | the Supabase session (access + refresh token) |
+
+Optionally, trips sync across devices through Supabase behind an e-mail login.
+Sync is entirely opt-in: with no project configured the feature is invisible and
+the app behaves exactly as a local-only tracker. Export/Import on the statistics
+page still works either way.
+
+Conflicts resolve per trip, keyed by the stable train id from `buildTrainId()`:
+the copy with the newer client-supplied `updatedAt` wins, and a deletion only
+wins if it happened after the entry's last edit — so re-logging a train you
+deleted on another device keeps it.
+
+### Enabling sync
+
+1. Create a Supabase project. From **Project Settings → Data API** note the
+   **Project URL** and the **anon / publishable key**, and put both into
+   [js/supabase.js](js/supabase.js). The anon key is safe to commit: it only
+   identifies the project, and the row-level-security policy below is what
+   actually protects the data.
+2. **Auth → Providers → Email**: enable it. Leave e-mail confirmation on — the
+   code flow below doubles as the confirmation.
+3. **Auth → Email Templates → Magic Link**: replace the `{{ .ConfirmationURL }}`
+   link with `{{ .Token }}` so the mail delivers a **6-digit code** instead of a
+   link. This matters: a magic link opens in the phone's default browser, which
+   is often not the browser holding the half-finished login.
+4. **Auth → URL Configuration → Site URL**:
+   `https://bernhardkreminski.github.io/D-nceBahnTracker/`
+5. Run the SQL below in the SQL editor.
+6. Create the account once through the app's own sign-in form.
+
+```sql
+create table public.entries (
+  user_id                uuid        not null references auth.users(id) on delete cascade,
+  id                     text        not null,   -- buildTrainId(), stable per train
+  line                   text,
+  train_number           text,
+  direction              text        not null,   -- 'RO_MU' | 'MU_RO'
+  from_name              text,
+  to_name                text,
+  service_date           date        not null,
+  scheduled_departure    timestamptz not null,
+  scheduled_arrival      timestamptz not null,
+  scheduled_duration_min int,
+  departure_delay_min    int         not null default 0,
+  arrival_delay_min      int         not null default 0,
+  cancelled              boolean     not null default false,
+  note                   text        not null default '',
+  created_at             timestamptz not null,
+  updated_at             timestamptz not null,   -- client-supplied, drives the merge
+  deleted_at             timestamptz,            -- soft delete
+  primary key (user_id, id)
+);
+
+create index entries_user_updated_idx on public.entries (user_id, updated_at desc);
+
+alter table public.entries enable row level security;
+
+create policy "own rows only" on public.entries
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+```
+
+Verify the policy is active before the first real write:
+
+```sql
+select * from pg_policies where tablename = 'entries';
+```
+
+Do **not** add a trigger that overwrites `updated_at`. It is deliberately
+client-supplied so an offline edit keeps the time it was actually made; a
+server-side timestamp would break the merge.
+
+> Free-tier note: a Supabase project pauses after roughly a week without
+> traffic. Daily use keeps it awake; after a longer break it needs one click on
+> **Restore** in the dashboard. A sync failing right after a holiday is usually
+> this, not a bug — the app says so in the error message.
 
 ## Development
 
@@ -68,7 +153,9 @@ python3 -m http.server 8000
 | `js/api.js` | Live data with the three-tier fallback |
 | `js/timetable.js` | Offline fallback timetable |
 | `js/model.js` | Shared `Train`/`Entry` shapes and derived metrics |
-| `js/storage.js` | `localStorage` persistence |
+| `js/storage.js` | `localStorage` persistence, tombstones, dirty set |
+| `js/supabase.js` | Project credentials, e-mail OTP auth, REST access |
+| `js/sync.js` | Pull/merge/push round and the conflict rules |
 | `js/config.js` | Stations, directions, time window |
 | `css/app.css` | Design system shared by both pages |
 

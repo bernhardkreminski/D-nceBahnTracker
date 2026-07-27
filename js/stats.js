@@ -14,6 +14,17 @@ import {
   delaySeverity,
 } from './model.js';
 import { listEntries, deleteEntry, clearAll, exportJSON, importJSON } from './storage.js';
+import {
+  isSupabaseConfigured,
+  getSession,
+  isSignedIn,
+  onAuthChange,
+  sendCode,
+  verifyCode,
+  signOut,
+  sync,
+  getSyncMeta,
+} from './sync.js';
 
 // ---------------------------------------------------------------------------
 // Preferences (persisted)
@@ -50,6 +61,29 @@ function savePrefs(prefs) {
 }
 
 let prefs = loadPrefs();
+
+// ---------------------------------------------------------------------------
+// Device sync UI state (transient -- never persisted, so an unrelated
+// re-render never wipes a half-typed e-mail or code)
+// ---------------------------------------------------------------------------
+
+/**
+ * `stage` only distinguishes the two states that exist before a session
+ * exists ('signedOut' | 'codeSent'); once a session exists, renderSyncCard()
+ * dispatches on isSignedIn() instead so an externally-fired onAuthChange
+ * (e.g. an expired session) flips the card without touching this field.
+ *
+ * `busy` is false, or one of 'send' | 'verify' | 'sync' | 'signout' -- which
+ * action is in flight, so the button that triggered it can show the right
+ * German loading label while every button in the card stays disabled.
+ */
+const syncUi = {
+  email: '',
+  code: '',
+  stage: 'signedOut',
+  busy: false,
+  error: '',
+};
 
 // ---------------------------------------------------------------------------
 // Static option lists
@@ -249,6 +283,7 @@ function cacheEls() {
     'chartTitle', 'periodChart', 'periodChartHint', 'histogramChart',
     'directionChart', 'worstTableBody', 'worstHint', 'tripsTableBody',
     'tripsEmptyHint', 'cancelledHint', 'dataHint', 'importFile',
+    'syncSection', 'syncCard',
   ];
   for (const id of ids) els[id] = document.getElementById(id);
 }
@@ -292,6 +327,10 @@ function directionLabel(id) {
 
 function render() {
   const all = listEntries();
+
+  // Independent of the trips data below, so it stays current even in the
+  // empty state (and after a sync that pulls in the very first entries).
+  renderSyncCard();
 
   if (all.length === 0) {
     els.emptySection.hidden = false;
@@ -622,6 +661,240 @@ function renderTripsTable(entries) {
 }
 
 // ---------------------------------------------------------------------------
+// Device sync card
+// ---------------------------------------------------------------------------
+
+function syncField(labelText, input) {
+  return el('div', { className: 'field' }, [el('div', { className: 'label', text: labelText }), input]);
+}
+
+function syncNotice(message) {
+  return el('div', { className: 'notice' }, [
+    el('span', { attrs: { 'aria-hidden': 'true' }, text: '⚠️' }),
+    el('span', { text: message }),
+  ]);
+}
+
+function syncButton(className, label, busyLabel, onClick) {
+  const btn = el('button', {
+    className,
+    text: syncUi.busy ? busyLabel || label : label,
+    attrs: { type: 'button' },
+  });
+  if (syncUi.busy) btn.disabled = true;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function renderSyncSignedOut(card) {
+  card.appendChild(
+    el('p', {
+      className: 'hint',
+      text:
+        'Deine Fahrten werden aktuell nur in diesem Browser gespeichert. Melde dich an, um sie geräteübergreifend zu synchronisieren.',
+    })
+  );
+
+  const input = el('input', {
+    className: 'input',
+    attrs: { type: 'email', inputmode: 'email', autocomplete: 'email', placeholder: 'du@beispiel.de' },
+  });
+  input.value = syncUi.email;
+  input.addEventListener('input', () => {
+    syncUi.email = input.value;
+  });
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') handleSendCode(input.value);
+  });
+  card.appendChild(syncField('E-Mail', input));
+
+  card.appendChild(
+    syncButton('btn btn--primary btn--block', 'Code senden', 'Sende Code …', () => handleSendCode(input.value))
+  );
+}
+
+function renderSyncCodeSent(card) {
+  card.appendChild(
+    el('p', {
+      className: 'hint',
+      text: `Code gesendet an ${syncUi.email}. Bitte den 6-stelligen Code aus der E-Mail eingeben.`,
+    })
+  );
+
+  const emailInput = el('input', { className: 'input', attrs: { type: 'email', readonly: 'readonly' } });
+  emailInput.value = syncUi.email;
+  card.appendChild(syncField('E-Mail', emailInput));
+
+  const codeInput = el('input', {
+    className: 'input',
+    attrs: { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '6', placeholder: '123456' },
+  });
+  codeInput.value = syncUi.code;
+  codeInput.addEventListener('input', () => {
+    syncUi.code = codeInput.value;
+  });
+  codeInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') handleVerifyCode();
+  });
+  card.appendChild(syncField('Code', codeInput));
+
+  const btnRow = el('div', { className: 'btn-row' });
+  btnRow.appendChild(syncButton('btn btn--primary', 'Anmelden', 'Melde an …', () => handleVerifyCode()));
+  btnRow.appendChild(
+    syncButton('btn btn--ghost', 'Andere E-Mail', null, () => {
+      syncUi.stage = 'signedOut';
+      syncUi.code = '';
+      syncUi.error = '';
+      renderSyncCard();
+    })
+  );
+  card.appendChild(btnRow);
+
+  card.appendChild(
+    syncButton('btn btn--ghost btn--block', 'Code erneut senden', 'Sende Code …', () => handleSendCode(syncUi.email))
+  );
+}
+
+function renderSyncSignedIn(card) {
+  const meta = getSyncMeta();
+  const lastSync = meta.lastSyncAt ? new Date(meta.lastSyncAt).toLocaleString('de-DE') : 'noch nie';
+
+  card.appendChild(
+    el('div', { className: 'row-between' }, [
+      el('div', { text: getSession()?.email || '' }),
+      el('span', { className: 'badge badge--ok', text: 'angemeldet' }),
+    ])
+  );
+  card.appendChild(el('p', { className: 'hint', text: `Letzte Synchronisierung: ${lastSync}` }));
+
+  const btnRow = el('div', { className: 'btn-row' });
+  btnRow.appendChild(syncButton('btn', 'Jetzt synchronisieren', 'Synchronisiere …', () => handleSync()));
+  btnRow.appendChild(syncButton('btn btn--danger', 'Abmelden', 'Melde ab …', () => handleSignOut()));
+  card.appendChild(btnRow);
+}
+
+function renderSyncCard() {
+  const section = els.syncSection;
+  const card = els.syncCard;
+  if (!section || !card) return;
+
+  if (!isSupabaseConfigured()) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+
+  clear(card);
+  if (syncUi.error) card.appendChild(syncNotice(syncUi.error));
+
+  if (isSignedIn()) {
+    renderSyncSignedIn(card);
+  } else if (syncUi.stage === 'codeSent') {
+    renderSyncCodeSent(card);
+  } else {
+    renderSyncSignedOut(card);
+  }
+}
+
+async function handleSendCode(emailValue) {
+  const address = String(emailValue || '').trim();
+  syncUi.error = '';
+  if (!address) {
+    syncUi.error = 'Bitte eine E-Mail-Adresse eingeben.';
+    renderSyncCard();
+    return;
+  }
+  syncUi.email = address;
+  syncUi.busy = 'send';
+  renderSyncCard();
+  try {
+    await sendCode(address);
+    syncUi.stage = 'codeSent';
+    syncUi.code = '';
+  } catch (err) {
+    syncUi.error = err.message;
+  } finally {
+    syncUi.busy = false;
+    renderSyncCard();
+  }
+}
+
+async function handleVerifyCode() {
+  const code = String(syncUi.code || '').trim();
+  syncUi.error = '';
+  if (!code) {
+    syncUi.error = 'Bitte den Code aus der E-Mail eingeben.';
+    renderSyncCard();
+    return;
+  }
+  syncUi.busy = 'verify';
+  renderSyncCard();
+  try {
+    await verifyCode(syncUi.email, code);
+    syncUi.code = '';
+    // Signed in now (isSignedIn() drives the dispatch); immediately pull in
+    // whatever this account already has on the server, in its own try/catch
+    // so a sign-in that succeeds but fails to sync still lands in the
+    // signed-in stage with the error shown -- "Jetzt synchronisieren" is the
+    // retry path.
+    syncUi.busy = 'sync';
+    renderSyncCard();
+    try {
+      const result = await sync();
+      toast(`Synchronisiert · ${result.count} Fahrten`);
+      render();
+    } catch (syncErr) {
+      syncUi.error = syncErr.message;
+    }
+  } catch (err) {
+    syncUi.error = err.message;
+  } finally {
+    syncUi.busy = false;
+    renderSyncCard();
+  }
+}
+
+async function handleSync() {
+  syncUi.error = '';
+  syncUi.busy = 'sync';
+  renderSyncCard();
+  try {
+    const result = await sync();
+    toast(`Synchronisiert · ${result.count} Fahrten`);
+    render(); // a pull can bring in entries logged on another device
+  } catch (err) {
+    syncUi.error = err.message;
+  } finally {
+    syncUi.busy = false;
+    renderSyncCard();
+  }
+}
+
+async function handleSignOut() {
+  if (
+    !window.confirm(
+      'Wirklich abmelden? Lokal gespeicherte Fahrten bleiben erhalten, werden aber nicht mehr synchronisiert.'
+    )
+  ) {
+    return;
+  }
+  syncUi.error = '';
+  syncUi.busy = 'signout';
+  renderSyncCard();
+  try {
+    await signOut(); // keeps dbt.entries.v1 -- only stops syncing
+    syncUi.stage = 'signedOut';
+    syncUi.email = '';
+    syncUi.code = '';
+  } catch (err) {
+    syncUi.error = err.message;
+  } finally {
+    syncUi.busy = false;
+    renderSyncCard();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Controls wiring
 // ---------------------------------------------------------------------------
 
@@ -733,6 +1006,18 @@ function init() {
   wireSegmented('directionControl', 'direction');
   wireSegmented('cancelledControl', 'cancelledMode');
   wireDataManagement();
+  // An expired/refreshed session (or a sign-out from another tab) must flip
+  // the card without a reload. A session that disappears from outside our own
+  // handlers (e.g. a refresh-token rejection) must land on the clean e-mail
+  // form, not on a stale codeSent/error left over from an earlier attempt.
+  onAuthChange((nextSession) => {
+    if (!nextSession) {
+      syncUi.stage = 'signedOut';
+      syncUi.code = '';
+      syncUi.error = '';
+    }
+    renderSyncCard();
+  });
   render();
 }
 

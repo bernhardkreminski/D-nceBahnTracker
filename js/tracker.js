@@ -14,6 +14,7 @@ import {
   delaySeverity,
 } from './model.js';
 import { getEntry, saveEntry, deleteEntry } from './storage.js';
+import { syncInBackground } from './sync.js';
 
 const QUICK_PICKS = [0, 2, 5, 10, 15, 20, 30, 45, 60];
 const REFRESH_MS = 60000;
@@ -412,6 +413,7 @@ function handleSave() {
   closeSheet();
   showToast('Gespeichert');
   render();
+  syncInBackground(); // fire-and-forget: saving must never wait on the network
 }
 
 function handleDelete() {
@@ -421,6 +423,7 @@ function handleDelete() {
   closeSheet();
   showToast('Gelöscht');
   render();
+  syncInBackground();
 }
 
 // ---------------------------------------------------------------------------
