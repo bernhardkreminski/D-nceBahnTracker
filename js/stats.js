@@ -22,6 +22,8 @@ import {
   signOut,
   sync,
   getSyncMeta,
+  startAutoSync,
+  onSyncStateChange,
 } from './sync.js';
 import { initAuthGate } from './auth-gate.js';
 
@@ -871,6 +873,15 @@ function init() {
   onAuthChange((nextSession) => {
     if (!nextSession) syncUi.error = '';
     renderSyncCard();
+  });
+
+  // Trips logged on another device should turn up here on their own.
+  startAutoSync();
+  onSyncStateChange((event) => {
+    if (event.status === 'ok') {
+      if (event.result?.changed) render(); // pulled something in -- redraw everything
+      else renderSyncCard(); // otherwise just refresh the "last sync" line
+    }
   });
   render();
 }

@@ -215,13 +215,7 @@ async function pullRemote(since) {
 // Public sync
 // ---------------------------------------------------------------------------
 
-/**
- * Pull, merge, push. Safe to call repeatedly. Any failure leaves the dirty set
- * intact so the next round retries.
- *
- * @returns {Promise<{count: number, pulled: number, pushed: boolean, at: string}>}
- */
-export async function sync() {
+async function runSync() {
   if (!isSupabaseConfigured()) throw new Error('Supabase ist in dieser Installation nicht konfiguriert.');
   const session = getSession();
   if (!session) throw new Error('Nicht angemeldet.');
@@ -234,6 +228,11 @@ export async function sync() {
 
   const localCount = Object.keys(local.entries).length;
   const pulled = Object.keys(remote.entries).length + Object.keys(remote.deleted).length;
+
+  // Whether the merge actually altered what the pages render. Drives the
+  // re-render after a background sync, so an automatic round that changed
+  // nothing does not churn the UI.
+  const changed = JSON.stringify(local.entries) !== JSON.stringify(merged.entries);
 
   replaceAll(merged.entries, merged.deleted);
 
@@ -278,8 +277,61 @@ export async function sync() {
     count: Object.keys(merged.entries).length,
     pulled,
     pushed: rowsToUpsert.length + tombstonesToPush.length > 0,
+    changed,
     at,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Coalescing + listeners
+// ---------------------------------------------------------------------------
+
+let inFlight = null;
+const syncListeners = new Set();
+
+/**
+ * Subscribe to sync activity. Called with
+ * `{ status: 'start' }`, `{ status: 'ok', result }` or `{ status: 'error', error }`.
+ * Returns an unsubscribe function.
+ */
+export function onSyncStateChange(cb) {
+  syncListeners.add(cb);
+  return () => syncListeners.delete(cb);
+}
+
+function emit(event) {
+  for (const cb of syncListeners) {
+    try {
+      cb(event);
+    } catch (err) {
+      console.warn('[sync] listener failed', err);
+    }
+  }
+}
+
+/**
+ * Pull, merge, push. Safe to call repeatedly: concurrent callers share one
+ * round rather than racing each other into duplicate writes. Any failure leaves
+ * the dirty set intact so the next round retries.
+ *
+ * @returns {Promise<{count: number, pulled: number, pushed: boolean, changed: boolean, at: string}>}
+ */
+export function sync() {
+  if (inFlight) return inFlight;
+  emit({ status: 'start' });
+  inFlight = runSync()
+    .then((result) => {
+      emit({ status: 'ok', result });
+      return result;
+    })
+    .catch((err) => {
+      emit({ status: 'error', error: err });
+      throw err;
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+  return inFlight;
 }
 
 /** Fire-and-forget sync used after a save; never rejects, never blocks the UI. */
@@ -289,4 +341,80 @@ export function syncInBackground() {
     console.warn('[sync] Hintergrund-Synchronisierung fehlgeschlagen', err);
     return null;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Automatic background syncing
+// ---------------------------------------------------------------------------
+
+const AUTO_INTERVAL_MS = 3 * 60 * 1000;
+const AUTO_MAX_BACKOFF_MS = 30 * 60 * 1000;
+const AUTO_MIN_GAP_MS = 15 * 1000; // floor between rounds, whatever triggers them
+
+let autoTimer = null;
+let autoStarted = false;
+let consecutiveFailures = 0;
+let lastAttemptAt = 0;
+
+function nextDelay() {
+  // Back off after repeated failures so a device that is simply offline stops
+  // retrying every few minutes, but recover immediately once one round works.
+  const factor = Math.min(2 ** consecutiveFailures, AUTO_MAX_BACKOFF_MS / AUTO_INTERVAL_MS);
+  return Math.min(AUTO_INTERVAL_MS * factor, AUTO_MAX_BACKOFF_MS);
+}
+
+function scheduleNext() {
+  clearTimeout(autoTimer);
+  if (!autoStarted) return;
+  autoTimer = setTimeout(() => attemptAutoSync('interval'), nextDelay());
+}
+
+async function attemptAutoSync(reason) {
+  if (!autoStarted || !isSupabaseConfigured() || !isSignedIn()) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    scheduleNext(); // nothing to do until the 'online' event
+    return;
+  }
+  if (Date.now() - lastAttemptAt < AUTO_MIN_GAP_MS && reason !== 'manual') {
+    scheduleNext();
+    return;
+  }
+  lastAttemptAt = Date.now();
+  try {
+    await sync();
+    consecutiveFailures = 0;
+  } catch {
+    consecutiveFailures += 1; // sync() already emitted the error to listeners
+  } finally {
+    scheduleNext();
+  }
+}
+
+function handleVisibility() {
+  if (document.visibilityState === 'visible') attemptAutoSync('visible');
+}
+
+function handleOnline() {
+  consecutiveFailures = 0; // connectivity is back; drop the backoff
+  attemptAutoSync('online');
+}
+
+/**
+ * Keep this tab in step with the other devices: sync on start, whenever the tab
+ * becomes visible again, when connectivity returns, and periodically while the
+ * tab is open. Idempotent.
+ */
+export function startAutoSync() {
+  if (autoStarted || !isSupabaseConfigured()) return;
+  autoStarted = true;
+  document.addEventListener('visibilitychange', handleVisibility);
+  window.addEventListener('online', handleOnline);
+  attemptAutoSync('start');
+}
+
+export function stopAutoSync() {
+  autoStarted = false;
+  clearTimeout(autoTimer);
+  document.removeEventListener('visibilitychange', handleVisibility);
+  window.removeEventListener('online', handleOnline);
 }

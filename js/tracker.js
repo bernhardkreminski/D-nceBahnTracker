@@ -14,7 +14,7 @@ import {
   delaySeverity,
 } from './model.js';
 import { getEntry, saveEntry, deleteEntry } from './storage.js';
-import { syncInBackground } from './sync.js';
+import { syncInBackground, startAutoSync, onSyncStateChange } from './sync.js';
 import { initAuthGate } from './auth-gate.js';
 
 const QUICK_PICKS = [0, 2, 5, 10, 15, 20, 30, 45, 60];
@@ -91,6 +91,14 @@ async function init() {
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && !state.sheetOpen) loadTrains();
+  });
+
+  // Trips logged on another device should turn up here on their own.
+  startAutoSync();
+  onSyncStateChange((event) => {
+    // Only when the merge actually brought something in, and never while the
+    // user is mid-edit in the sheet.
+    if (event.status === 'ok' && event.result?.changed && !state.sheetOpen) render();
   });
 }
 

@@ -85,6 +85,28 @@ the copy with the newer client-supplied `updatedAt` wins, and a deletion only
 wins if it happened after the entry's last edit — so re-logging a train you
 deleted on another device keeps it.
 
+### When it syncs
+
+Syncing is automatic; the manual button on the statistics page is only a
+fallback. A round runs:
+
+- immediately after logging, editing or deleting a trip,
+- on sign-in,
+- when a page opens,
+- whenever the tab becomes visible again,
+- when connectivity returns (the `online` event),
+- and every 3 minutes while a tab is open.
+
+Concurrent triggers share a single round rather than racing each other, and
+rounds are never closer together than 15 seconds. Repeated failures back off
+exponentially to a maximum of 30 minutes, so a device that is simply offline
+stops retrying pointlessly; one success — or the `online` event — resets it
+immediately. While `navigator.onLine` is false no request is attempted at all.
+
+When a round pulls in something new, the open page re-renders itself. The
+tracker deliberately holds that redraw back while the delay sheet is open, so a
+background sync can never move the form under you mid-edit.
+
 ### Enabling sync
 
 1. Create a Supabase project. From **Project Settings → API Keys** note the
