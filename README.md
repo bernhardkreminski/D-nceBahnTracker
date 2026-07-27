@@ -99,9 +99,9 @@ deleted on another device keeps it.
 4. **Authentication → URL Configuration → Site URL**:
    `https://bernhardkreminski.github.io/D-nceBahnTracker/`
 5. Run the SQL below in the SQL editor.
-6. Create the account once through the app's own form: Statistik →
-   Geräte-Sync → **Registrieren**. Then, optionally, turn **Allow new users to
-   sign up** off so no one else can create an account in the project.
+6. Create the account once on the app's own login screen — open the site and
+   choose **Registrieren**. Then turn **Allow new users to sign up** off, so no
+   one else can create an account in the project.
 
 ```sql
 create table public.entries (
