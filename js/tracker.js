@@ -15,6 +15,7 @@ import {
 } from './model.js';
 import { getEntry, saveEntry, deleteEntry } from './storage.js';
 import { syncInBackground } from './sync.js';
+import { initAuthGate } from './auth-gate.js';
 
 const QUICK_PICKS = [0, 2, 5, 10, 15, 20, 30, 45, 60];
 const REFRESH_MS = 60000;
@@ -76,7 +77,8 @@ const sheet = {
 let toastTimer = null;
 let refreshTimer = null;
 
-init();
+// The page stays locked until a session exists; init() runs once, on unlock.
+initAuthGate({ onSignedIn: init });
 
 async function init() {
   wireStaticEvents();

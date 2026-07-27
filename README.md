@@ -58,10 +58,19 @@ works on a train with no reception.
 | `dbt.sync.v1` | last sync time and the incremental pull cursor |
 | `dbt.auth.v1` | the Supabase session (access + refresh token) |
 
-Optionally, trips sync across devices through Supabase behind an e-mail +
-password login. Sync is entirely opt-in: with no project configured the feature
-is invisible and the app behaves exactly as a local-only tracker. Export/Import
-on the statistics page still works either way.
+**Signing in is required.** Both pages stay behind an auth gate
+([js/auth-gate.js](js/auth-gate.js)) until a session exists, and trips sync
+across devices through Supabase.
+
+The gate checks for a *session*, not for connectivity — deliberately, since the
+point of the app is logging a delay on a train with no reception. A device that
+has signed in once opens straight into the app and keeps working offline; only a
+device that has never signed in, or that signed out, sees the login screen. If
+the server later rejects the stored session, the gate comes back up and local
+trips are kept, never wiped.
+
+(If a fork of this repo has no Supabase project configured, the gate steps aside
+rather than locking everyone out, and the app runs as a purely local tracker.)
 
 Sign-in is a password rather than an e-mailed code, which the original plan
 called for. Supabase's free tier locks the e-mail templates behind custom SMTP —
@@ -161,6 +170,7 @@ python3 -m http.server 8000
 | `js/api.js` | Live data with the three-tier fallback |
 | `js/timetable.js` | Offline fallback timetable |
 | `js/model.js` | Shared `Train`/`Entry` shapes and derived metrics |
+| `js/auth-gate.js` | Sign-in gate that locks both pages until a session exists |
 | `js/storage.js` | `localStorage` persistence, tombstones, dirty set |
 | `js/supabase.js` | Project credentials, e-mail OTP auth, REST access |
 | `js/sync.js` | Pull/merge/push round and the conflict rules |

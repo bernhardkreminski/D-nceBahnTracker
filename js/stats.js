@@ -19,13 +19,11 @@ import {
   getSession,
   isSignedIn,
   onAuthChange,
-  signUp,
-  signIn,
   signOut,
-  MIN_PASSWORD_LENGTH,
   sync,
   getSyncMeta,
 } from './sync.js';
+import { initAuthGate } from './auth-gate.js';
 
 // ---------------------------------------------------------------------------
 // Preferences (persisted)
@@ -69,19 +67,13 @@ let prefs = loadPrefs();
 // ---------------------------------------------------------------------------
 
 /**
- * renderSyncCard() dispatches on isSignedIn(), so an externally-fired
- * onAuthChange (e.g. an expired session) flips the card on its own.
- *
- * `busy` is false, or one of 'signin' | 'signup' | 'sync' | 'signout' -- which
- * action is in flight, so the button that triggered it can show the right
- * German loading label while every button in the card stays disabled.
- *
- * The password lives here only for as long as the form is on screen; it is
- * never persisted and never written back into the DOM.
+ * Signing in is the auth gate's job (js/auth-gate.js); this card only covers the
+ * signed-in state, so it just tracks which action is in flight and the last
+ * error. `busy` is false or one of 'sync' | 'signout', which lets the button
+ * that triggered it show the right German loading label while all of them stay
+ * disabled.
  */
 const syncUi = {
-  email: '',
-  password: '',
   busy: false,
   error: '',
 };
@@ -665,10 +657,6 @@ function renderTripsTable(entries) {
 // Device sync card
 // ---------------------------------------------------------------------------
 
-function syncField(labelText, input) {
-  return el('div', { className: 'field' }, [el('div', { className: 'label', text: labelText }), input]);
-}
-
 function syncNotice(message) {
   return el('div', { className: 'notice' }, [
     el('span', { attrs: { 'aria-hidden': 'true' }, text: '⚠️' }),
@@ -685,54 +673,6 @@ function syncButton(className, label, busyLabel, onClick) {
   if (syncUi.busy) btn.disabled = true;
   btn.addEventListener('click', onClick);
   return btn;
-}
-
-function renderSyncSignedOut(card) {
-  card.appendChild(
-    el('p', {
-      className: 'hint',
-      text:
-        'Deine Fahrten werden aktuell nur in diesem Browser gespeichert. Melde dich an, um sie geräteübergreifend zu synchronisieren.',
-    })
-  );
-
-  const emailInput = el('input', {
-    className: 'input',
-    attrs: { type: 'email', inputmode: 'email', autocomplete: 'email', placeholder: 'du@beispiel.de' },
-  });
-  emailInput.value = syncUi.email;
-  emailInput.addEventListener('input', () => {
-    syncUi.email = emailInput.value;
-  });
-  card.appendChild(syncField('E-Mail', emailInput));
-
-  const passwordInput = el('input', {
-    className: 'input',
-    attrs: { type: 'password', autocomplete: 'current-password', placeholder: '••••••••' },
-  });
-  passwordInput.value = syncUi.password;
-  passwordInput.addEventListener('input', () => {
-    syncUi.password = passwordInput.value;
-  });
-  passwordInput.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') handleAuth('signin');
-  });
-  card.appendChild(syncField('Passwort', passwordInput));
-
-  const btnRow = el('div', { className: 'btn-row' });
-  btnRow.appendChild(syncButton('btn btn--primary', 'Anmelden', 'Melde an …', () => handleAuth('signin')));
-  btnRow.appendChild(syncButton('btn btn--ghost', 'Registrieren', 'Registriere …', () => handleAuth('signup')));
-  card.appendChild(btnRow);
-
-  card.appendChild(
-    el('p', {
-      className: 'hint',
-      text:
-        `Beim ersten Mal „Registrieren“ wählen (mindestens ${MIN_PASSWORD_LENGTH} Zeichen), ` +
-        'danach auf jedem weiteren Gerät „Anmelden“. Am besten das Passwort im Passwort-Manager speichern — ' +
-        'es gibt keine Zurücksetzen-E-Mail.',
-    })
-  );
 }
 
 function renderSyncSignedIn(card) {
@@ -764,59 +704,16 @@ function renderSyncCard() {
   }
   section.hidden = false;
 
+  // Signing in happens at the auth gate, which covers the page whenever there
+  // is no session -- so this card only ever has a signed-in state to show.
+  if (!isSignedIn()) {
+    section.hidden = true;
+    return;
+  }
+
   clear(card);
   if (syncUi.error) card.appendChild(syncNotice(syncUi.error));
-
-  if (isSignedIn()) {
-    renderSyncSignedIn(card);
-  } else {
-    renderSyncSignedOut(card);
-  }
-}
-
-/** @param {'signin'|'signup'} mode */
-async function handleAuth(mode) {
-  const address = String(syncUi.email || '').trim();
-  const password = String(syncUi.password || '');
-  syncUi.error = '';
-
-  if (!address) {
-    syncUi.error = 'Bitte eine E-Mail-Adresse eingeben.';
-    renderSyncCard();
-    return;
-  }
-  if (!password) {
-    syncUi.error = 'Bitte ein Passwort eingeben.';
-    renderSyncCard();
-    return;
-  }
-
-  syncUi.busy = mode === 'signup' ? 'signup' : 'signin';
-  renderSyncCard();
-  try {
-    if (mode === 'signup') await signUp(address, password);
-    else await signIn(address, password);
-    syncUi.password = ''; // don't keep it around once it has been used
-
-    // Signed in now (isSignedIn() drives the dispatch); immediately pull in
-    // whatever this account already has on the server, in its own try/catch so
-    // a sign-in that succeeds but fails to sync still lands in the signed-in
-    // view with the error shown -- "Jetzt synchronisieren" is the retry path.
-    syncUi.busy = 'sync';
-    renderSyncCard();
-    try {
-      const result = await sync();
-      toast(`Synchronisiert · ${result.count} Fahrten`);
-      render();
-    } catch (syncErr) {
-      syncUi.error = syncErr.message;
-    }
-  } catch (err) {
-    syncUi.error = err.message;
-  } finally {
-    syncUi.busy = false;
-    renderSyncCard();
-  }
+  renderSyncSignedIn(card);
 }
 
 async function handleSync() {
@@ -847,9 +744,7 @@ async function handleSignOut() {
   syncUi.busy = 'signout';
   renderSyncCard();
   try {
-    await signOut(); // keeps dbt.entries.v1 -- only stops syncing
-    syncUi.email = '';
-    syncUi.password = '';
+    await signOut(); // keeps dbt.entries.v1 -- the gate takes over from here
   } catch (err) {
     syncUi.error = err.message;
   } finally {
@@ -970,18 +865,15 @@ function init() {
   wireSegmented('directionControl', 'direction');
   wireSegmented('cancelledControl', 'cancelledMode');
   wireDataManagement();
-  // An expired/refreshed session (or a sign-out from another tab) must flip
-  // the card without a reload. A session that disappears from outside our own
-  // handlers (e.g. a refresh-token rejection) must land on the clean sign-in
-  // form, not on a stale password/error left over from an earlier attempt.
+  // A session ending (sign-out, or a refresh token the server rejected) raises
+  // the auth gate over the page; clear the stale error so the card is clean if
+  // the same user signs back in.
   onAuthChange((nextSession) => {
-    if (!nextSession) {
-      syncUi.password = '';
-      syncUi.error = '';
-    }
+    if (!nextSession) syncUi.error = '';
     renderSyncCard();
   });
   render();
 }
 
-init();
+// The page stays locked until a session exists; init() runs once, on unlock.
+initAuthGate({ onSignedIn: init });

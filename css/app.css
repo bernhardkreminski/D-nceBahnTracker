@@ -602,6 +602,56 @@ body {
 .table tr:last-child td { border-bottom: 0; }
 .table .num { text-align: right; }
 
+/* ---------- Auth gate ---------- */
+
+/* Covers the whole app until a session exists. Opaque, so nothing behind it is
+   readable even for the instant before the script decides. */
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(env(safe-area-inset-top) + 20px) 16px calc(env(safe-area-inset-bottom) + 20px);
+  overflow-y: auto;
+}
+
+.gate[hidden] { display: none; }
+
+.gate-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 22px 18px;
+}
+
+.gate-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 4px;
+}
+
+.gate-logo { font-size: 26px; line-height: 1; }
+
+.gate-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.gate-sub {
+  margin: 0 0 18px;
+  font-size: 13.5px;
+  color: var(--text-dim);
+}
+
 /* ---------- States ---------- */
 
 .empty {

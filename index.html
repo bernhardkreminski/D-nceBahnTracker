@@ -10,6 +10,11 @@
 </head>
 <body>
 
+<!-- Shown until a session exists; filled in by js/auth-gate.js. -->
+<div class="gate" id="authGate"></div>
+
+<div id="appContent" hidden>
+
 <header class="appbar">
   <div>
     <h1 class="appbar-title">DänceBahnTracker</h1>
@@ -120,6 +125,8 @@
     <span>Statistik</span>
   </a>
 </nav>
+
+</div><!-- /#appContent -->
 
 <script type="module" src="js/tracker.js"></script>
 </body>
