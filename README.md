@@ -58,10 +58,18 @@ works on a train with no reception.
 | `dbt.sync.v1` | last sync time and the incremental pull cursor |
 | `dbt.auth.v1` | the Supabase session (access + refresh token) |
 
-Optionally, trips sync across devices through Supabase behind an e-mail login.
-Sync is entirely opt-in: with no project configured the feature is invisible and
-the app behaves exactly as a local-only tracker. Export/Import on the statistics
-page still works either way.
+Optionally, trips sync across devices through Supabase behind an e-mail +
+password login. Sync is entirely opt-in: with no project configured the feature
+is invisible and the app behaves exactly as a local-only tracker. Export/Import
+on the statistics page still works either way.
+
+Sign-in is a password rather than an e-mailed code, which the original plan
+called for. Supabase's free tier locks the e-mail templates behind custom SMTP —
+so the 6-digit `{{ .Token }}` cannot be put into the mail — and caps sending at
+**two e-mails per hour** project-wide, which a single retry would exhaust.
+Password sign-in sends no mail at all. There is consequently **no password-reset
+e-mail either**: keep the password in a password manager. If it is lost, set a
+new one from the Supabase dashboard under Authentication → Users.
 
 Conflicts resolve per trip, keyed by the stable train id from `buildTrainId()`:
 the copy with the newer client-supplied `updatedAt` wins, and a deletion only
@@ -70,21 +78,21 @@ deleted on another device keeps it.
 
 ### Enabling sync
 
-1. Create a Supabase project. From **Project Settings → Data API** note the
-   **Project URL** and the **anon / publishable key**, and put both into
-   [js/supabase.js](js/supabase.js). The anon key is safe to commit: it only
+1. Create a Supabase project. From **Project Settings → API Keys** note the
+   **Project URL** and the **publishable** (anon) key, and put both into
+   [js/supabase.js](js/supabase.js). That key is safe to commit: it only
    identifies the project, and the row-level-security policy below is what
-   actually protects the data.
-2. **Auth → Providers → Email**: enable it. Leave e-mail confirmation on — the
-   code flow below doubles as the confirmation.
-3. **Auth → Email Templates → Magic Link**: replace the `{{ .ConfirmationURL }}`
-   link with `{{ .Token }}` so the mail delivers a **6-digit code** instead of a
-   link. This matters: a magic link opens in the phone's default browser, which
-   is often not the browser holding the half-finished login.
-4. **Auth → URL Configuration → Site URL**:
+   actually protects the data. Never commit the **secret** key.
+2. **Authentication → Sign In / Providers → Email**: enabled (it is by default).
+3. Same page, turn **Confirm email off**. With it on, signing up would need a
+   confirmation mail, and the free tier's two-mails-per-hour cap makes that
+   fragile. Off, `signup` returns a usable session immediately.
+4. **Authentication → URL Configuration → Site URL**:
    `https://bernhardkreminski.github.io/D-nceBahnTracker/`
 5. Run the SQL below in the SQL editor.
-6. Create the account once through the app's own sign-in form.
+6. Create the account once through the app's own form: Statistik →
+   Geräte-Sync → **Registrieren**. Then, optionally, turn **Allow new users to
+   sign up** off so no one else can create an account in the project.
 
 ```sql
 create table public.entries (

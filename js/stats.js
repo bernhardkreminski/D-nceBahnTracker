@@ -19,9 +19,10 @@ import {
   getSession,
   isSignedIn,
   onAuthChange,
-  sendCode,
-  verifyCode,
+  signUp,
+  signIn,
   signOut,
+  MIN_PASSWORD_LENGTH,
   sync,
   getSyncMeta,
 } from './sync.js';
@@ -68,19 +69,19 @@ let prefs = loadPrefs();
 // ---------------------------------------------------------------------------
 
 /**
- * `stage` only distinguishes the two states that exist before a session
- * exists ('signedOut' | 'codeSent'); once a session exists, renderSyncCard()
- * dispatches on isSignedIn() instead so an externally-fired onAuthChange
- * (e.g. an expired session) flips the card without touching this field.
+ * renderSyncCard() dispatches on isSignedIn(), so an externally-fired
+ * onAuthChange (e.g. an expired session) flips the card on its own.
  *
- * `busy` is false, or one of 'send' | 'verify' | 'sync' | 'signout' -- which
+ * `busy` is false, or one of 'signin' | 'signup' | 'sync' | 'signout' -- which
  * action is in flight, so the button that triggered it can show the right
  * German loading label while every button in the card stays disabled.
+ *
+ * The password lives here only for as long as the form is on screen; it is
+ * never persisted and never written back into the DOM.
  */
 const syncUi = {
   email: '',
-  code: '',
-  stage: 'signedOut',
+  password: '',
   busy: false,
   error: '',
 };
@@ -695,63 +696,42 @@ function renderSyncSignedOut(card) {
     })
   );
 
-  const input = el('input', {
+  const emailInput = el('input', {
     className: 'input',
     attrs: { type: 'email', inputmode: 'email', autocomplete: 'email', placeholder: 'du@beispiel.de' },
   });
-  input.value = syncUi.email;
-  input.addEventListener('input', () => {
-    syncUi.email = input.value;
-  });
-  input.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') handleSendCode(input.value);
-  });
-  card.appendChild(syncField('E-Mail', input));
-
-  card.appendChild(
-    syncButton('btn btn--primary btn--block', 'Code senden', 'Sende Code …', () => handleSendCode(input.value))
-  );
-}
-
-function renderSyncCodeSent(card) {
-  card.appendChild(
-    el('p', {
-      className: 'hint',
-      text: `Code gesendet an ${syncUi.email}. Bitte den 6-stelligen Code aus der E-Mail eingeben.`,
-    })
-  );
-
-  const emailInput = el('input', { className: 'input', attrs: { type: 'email', readonly: 'readonly' } });
   emailInput.value = syncUi.email;
+  emailInput.addEventListener('input', () => {
+    syncUi.email = emailInput.value;
+  });
   card.appendChild(syncField('E-Mail', emailInput));
 
-  const codeInput = el('input', {
+  const passwordInput = el('input', {
     className: 'input',
-    attrs: { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '6', placeholder: '123456' },
+    attrs: { type: 'password', autocomplete: 'current-password', placeholder: '••••••••' },
   });
-  codeInput.value = syncUi.code;
-  codeInput.addEventListener('input', () => {
-    syncUi.code = codeInput.value;
+  passwordInput.value = syncUi.password;
+  passwordInput.addEventListener('input', () => {
+    syncUi.password = passwordInput.value;
   });
-  codeInput.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') handleVerifyCode();
+  passwordInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') handleAuth('signin');
   });
-  card.appendChild(syncField('Code', codeInput));
+  card.appendChild(syncField('Passwort', passwordInput));
 
   const btnRow = el('div', { className: 'btn-row' });
-  btnRow.appendChild(syncButton('btn btn--primary', 'Anmelden', 'Melde an …', () => handleVerifyCode()));
-  btnRow.appendChild(
-    syncButton('btn btn--ghost', 'Andere E-Mail', null, () => {
-      syncUi.stage = 'signedOut';
-      syncUi.code = '';
-      syncUi.error = '';
-      renderSyncCard();
-    })
-  );
+  btnRow.appendChild(syncButton('btn btn--primary', 'Anmelden', 'Melde an …', () => handleAuth('signin')));
+  btnRow.appendChild(syncButton('btn btn--ghost', 'Registrieren', 'Registriere …', () => handleAuth('signup')));
   card.appendChild(btnRow);
 
   card.appendChild(
-    syncButton('btn btn--ghost btn--block', 'Code erneut senden', 'Sende Code …', () => handleSendCode(syncUi.email))
+    el('p', {
+      className: 'hint',
+      text:
+        `Beim ersten Mal „Registrieren“ wählen (mindestens ${MIN_PASSWORD_LENGTH} Zeichen), ` +
+        'danach auf jedem weiteren Gerät „Anmelden“. Am besten das Passwort im Passwort-Manager speichern — ' +
+        'es gibt keine Zurücksetzen-E-Mail.',
+    })
   );
 }
 
@@ -789,54 +769,39 @@ function renderSyncCard() {
 
   if (isSignedIn()) {
     renderSyncSignedIn(card);
-  } else if (syncUi.stage === 'codeSent') {
-    renderSyncCodeSent(card);
   } else {
     renderSyncSignedOut(card);
   }
 }
 
-async function handleSendCode(emailValue) {
-  const address = String(emailValue || '').trim();
+/** @param {'signin'|'signup'} mode */
+async function handleAuth(mode) {
+  const address = String(syncUi.email || '').trim();
+  const password = String(syncUi.password || '');
   syncUi.error = '';
+
   if (!address) {
     syncUi.error = 'Bitte eine E-Mail-Adresse eingeben.';
     renderSyncCard();
     return;
   }
-  syncUi.email = address;
-  syncUi.busy = 'send';
-  renderSyncCard();
-  try {
-    await sendCode(address);
-    syncUi.stage = 'codeSent';
-    syncUi.code = '';
-  } catch (err) {
-    syncUi.error = err.message;
-  } finally {
-    syncUi.busy = false;
-    renderSyncCard();
-  }
-}
-
-async function handleVerifyCode() {
-  const code = String(syncUi.code || '').trim();
-  syncUi.error = '';
-  if (!code) {
-    syncUi.error = 'Bitte den Code aus der E-Mail eingeben.';
+  if (!password) {
+    syncUi.error = 'Bitte ein Passwort eingeben.';
     renderSyncCard();
     return;
   }
-  syncUi.busy = 'verify';
+
+  syncUi.busy = mode === 'signup' ? 'signup' : 'signin';
   renderSyncCard();
   try {
-    await verifyCode(syncUi.email, code);
-    syncUi.code = '';
+    if (mode === 'signup') await signUp(address, password);
+    else await signIn(address, password);
+    syncUi.password = ''; // don't keep it around once it has been used
+
     // Signed in now (isSignedIn() drives the dispatch); immediately pull in
-    // whatever this account already has on the server, in its own try/catch
-    // so a sign-in that succeeds but fails to sync still lands in the
-    // signed-in stage with the error shown -- "Jetzt synchronisieren" is the
-    // retry path.
+    // whatever this account already has on the server, in its own try/catch so
+    // a sign-in that succeeds but fails to sync still lands in the signed-in
+    // view with the error shown -- "Jetzt synchronisieren" is the retry path.
     syncUi.busy = 'sync';
     renderSyncCard();
     try {
@@ -883,9 +848,8 @@ async function handleSignOut() {
   renderSyncCard();
   try {
     await signOut(); // keeps dbt.entries.v1 -- only stops syncing
-    syncUi.stage = 'signedOut';
     syncUi.email = '';
-    syncUi.code = '';
+    syncUi.password = '';
   } catch (err) {
     syncUi.error = err.message;
   } finally {
@@ -1008,12 +972,11 @@ function init() {
   wireDataManagement();
   // An expired/refreshed session (or a sign-out from another tab) must flip
   // the card without a reload. A session that disappears from outside our own
-  // handlers (e.g. a refresh-token rejection) must land on the clean e-mail
-  // form, not on a stale codeSent/error left over from an earlier attempt.
+  // handlers (e.g. a refresh-token rejection) must land on the clean sign-in
+  // form, not on a stale password/error left over from an earlier attempt.
   onAuthChange((nextSession) => {
     if (!nextSession) {
-      syncUi.stage = 'signedOut';
-      syncUi.code = '';
+      syncUi.password = '';
       syncUi.error = '';
     }
     renderSyncCard();

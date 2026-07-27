@@ -1,4 +1,10 @@
-// Minimal Supabase client: e-mail OTP auth + PostgREST access over plain fetch.
+// Minimal Supabase client: e-mail + password auth and PostgREST access over
+// plain fetch.
+//
+// Password rather than an e-mailed code, because Supabase's free tier locks the
+// e-mail templates behind custom SMTP (so a code cannot be put in the mail) and
+// caps sending at two e-mails per hour project-wide -- which one retry would
+// exhaust. Password sign-in sends no mail at all.
 //
 // Deliberately not the supabase-js SDK. The app has to work on a train with no
 // reception, so a CDN import is out; and vendoring the SDK means ~260 kB of
@@ -15,8 +21,8 @@
 // governed by the row-level-security policy on public.entries, so that policy
 // MUST be active before the first real write.
 
-export const SUPABASE_URL = '';
-export const SUPABASE_ANON_KEY = '';
+export const SUPABASE_URL = 'https://hszzubzszslazetwqqmq.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_s8gB2eoIBtoL6fYFb9UR7w_LIWPyxl-';
 
 /** False until the two values above are filled in; the UI stays hidden then. */
 export function isSupabaseConfigured() {
@@ -114,10 +120,22 @@ export function describeError(err, status, body) {
     }
     return 'Sitzung abgelaufen oder ungültig. Bitte erneut anmelden.';
   }
-  if (status === 400) {
+  if (status === 400 || status === 422) {
     const msg = String(body?.error_description || body?.message || body?.msg || '');
-    if (/expired|invalid/i.test(msg)) return 'Der Code ist falsch oder abgelaufen. Bitte neuen Code anfordern.';
-    return msg ? `Anfrage abgelehnt: ${msg}` : 'Anfrage abgelehnt (400).';
+    if (/invalid login credentials|invalid_grant/i.test(msg)) {
+      return 'E-Mail oder Passwort ist falsch.';
+    }
+    if (/already registered|already been registered|user_already_exists/i.test(msg)) {
+      return 'Für diese E-Mail gibt es bereits ein Konto. Bitte stattdessen anmelden.';
+    }
+    if (/password/i.test(msg) && /short|length|weak|characters/i.test(msg)) {
+      return 'Das Passwort ist zu kurz oder zu schwach.';
+    }
+    if (/signups? not allowed|signup_disabled/i.test(msg)) {
+      return 'Registrierung ist für dieses Projekt deaktiviert.';
+    }
+    if (/email/i.test(msg) && /invalid/i.test(msg)) return 'Diese E-Mail-Adresse ist ungültig.';
+    return msg ? `Anfrage abgelehnt: ${msg}` : 'Anfrage abgelehnt.';
   }
   if (status === 404) return 'Tabelle nicht gefunden — wurde das SQL-Schema angelegt?';
   if (status === 429) return 'Zu viele Anfragen. Bitte kurz warten und erneut versuchen.';
@@ -208,37 +226,54 @@ async function ensureFreshToken() {
 // Auth
 // ---------------------------------------------------------------------------
 
-/** Send a 6-digit login code by e-mail. Creates the account on first use. */
-export async function sendCode(email) {
+export const MIN_PASSWORD_LENGTH = 6; // matches the project's Auth setting
+
+function requireCredentials(email, password) {
   const address = String(email || '').trim();
+  const secret = String(password || '');
   if (!address) throw new Error('Bitte eine E-Mail-Adresse eingeben.');
-  await request('/auth/v1/otp', {
-    method: 'POST',
-    body: { email: address, create_user: true },
-  });
-  return address;
+  if (!secret) throw new Error('Bitte ein Passwort eingeben.');
+  return { address, secret };
 }
 
-/** Exchange the e-mailed code for a session. */
-export async function verifyCode(email, code) {
-  const address = String(email || '').trim();
-  const token = String(code || '').trim();
-  if (!token) throw new Error('Bitte den Code aus der E-Mail eingeben.');
-
-  const data = await request('/auth/v1/verify', {
-    method: 'POST',
-    body: { email: address, token, type: 'email' },
-  });
-  if (!data?.access_token) throw new Error('Anmeldung fehlgeschlagen — kein Token erhalten.');
-
+function storeSession(data, fallbackEmail) {
+  if (!data?.access_token) {
+    throw new Error('Anmeldung fehlgeschlagen — kein Token erhalten.');
+  }
   writeSession({
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
     expiresAt: Date.now() + (Number(data.expires_in) || 3600) * 1000,
     userId: data.user?.id || '',
-    email: data.user?.email || address,
+    email: data.user?.email || fallbackEmail,
   });
   return getSession();
+}
+
+/**
+ * Create the account. E-mail confirmation is disabled on the project, so this
+ * returns a usable session straight away.
+ */
+export async function signUp(email, password) {
+  const { address, secret } = requireCredentials(email, password);
+  if (secret.length < MIN_PASSWORD_LENGTH) {
+    throw new Error(`Das Passwort muss mindestens ${MIN_PASSWORD_LENGTH} Zeichen lang sein.`);
+  }
+  const data = await request('/auth/v1/signup', {
+    method: 'POST',
+    body: { email: address, password: secret },
+  });
+  return storeSession(data, address);
+}
+
+/** Sign in to an existing account. */
+export async function signIn(email, password) {
+  const { address, secret } = requireCredentials(email, password);
+  const data = await request('/auth/v1/token?grant_type=password', {
+    method: 'POST',
+    body: { email: address, password: secret },
+  });
+  return storeSession(data, address);
 }
 
 export async function signOut() {

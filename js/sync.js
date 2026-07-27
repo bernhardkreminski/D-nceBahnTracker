@@ -20,9 +20,10 @@ import {
   getSession,
   isSignedIn,
   onAuthChange,
-  sendCode,
-  verifyCode as verifyCodeRaw,
+  signUp as signUpRaw,
+  signIn as signInRaw,
   signOut as signOutRaw,
+  MIN_PASSWORD_LENGTH,
   selectRows,
   upsertRows,
   patchRows,
@@ -34,7 +35,7 @@ const PUSH_CHUNK = 500;
 const PAGE_SIZE = 1000; // PostgREST's default ceiling
 
 // Re-exported so the UI only ever imports from this module.
-export { isSupabaseConfigured, getSession, isSignedIn, onAuthChange, sendCode };
+export { isSupabaseConfigured, getSession, isSignedIn, onAuthChange, MIN_PASSWORD_LENGTH };
 
 // ---------------------------------------------------------------------------
 // Sync metadata
@@ -69,15 +70,25 @@ export function getSyncMeta() {
 // ---------------------------------------------------------------------------
 
 /**
- * Sign in, then make sure a history logged before sync existed still reaches the
- * server: nothing marked those entries dirty, so seed the whole set once.
+ * A history logged before sync existed has nothing marking it dirty, so it would
+ * silently never reach the server. Seed the whole set once on first sign-in.
  */
-export async function verifyCode(email, code) {
-  const session = await verifyCodeRaw(email, code);
+function seedDirtyOnce() {
   if (!readMeta().seeded) {
     markAllDirty();
     writeMeta({ seeded: true });
   }
+}
+
+export async function signUp(email, password) {
+  const session = await signUpRaw(email, password);
+  seedDirtyOnce();
+  return session;
+}
+
+export async function signIn(email, password) {
+  const session = await signInRaw(email, password);
+  seedDirtyOnce();
   return session;
 }
 
