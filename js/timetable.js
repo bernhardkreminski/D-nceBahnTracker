@@ -13,12 +13,22 @@ import { buildTrainId, toServiceDate, minutesBetween, MS_MIN } from './model.js'
 
 const LINE = 'RE5';
 
-// Approximate scheduled runtime Rosenheim <-> München Hbf.
-const STATIC_DURATION_MIN = 43;
-
-/** Approximate hourly clock-face departures, local "HH:MM", no live data. */
+/**
+ * Approximate hourly clock-face departures, local "HH:MM", no live data.
+ *
+ * The Ost variants are the same physical trains as the Hbf ones. Towards Munich
+ * they leave Rosenheim at the same minute and simply reach Ost first, so the
+ * departures are identical and only the runtime differs. Coming back they are a
+ * separate departure roughly nine minutes after Hbf, because the train has to
+ * travel Hbf -> Ost first.
+ */
 export const STATIC_TIMETABLE = {
   RO_MU: [
+    '04:35', '05:35', '06:32', '07:33', '08:32', '09:32', '10:32', '11:32',
+    '12:32', '13:32', '14:32', '15:32', '16:32', '17:33', '18:32', '19:33',
+    '20:32', '21:32', '22:32', '23:35',
+  ],
+  RO_MO: [
     '04:35', '05:35', '06:32', '07:33', '08:32', '09:32', '10:32', '11:32',
     '12:32', '13:32', '14:32', '15:32', '16:32', '17:33', '18:32', '19:33',
     '20:32', '21:32', '22:32', '23:35',
@@ -27,6 +37,11 @@ export const STATIC_TIMETABLE = {
     '04:39', '05:39', '06:39', '07:39', '08:39', '09:39', '10:39', '11:39',
     '12:39', '13:39', '14:39', '15:39', '16:39', '17:39', '18:39', '19:39',
     '20:39', '21:39', '22:39', '23:39',
+  ],
+  MO_RO: [
+    '04:48', '05:48', '06:48', '07:48', '08:48', '09:48', '10:48', '11:48',
+    '12:48', '13:48', '14:48', '15:48', '16:48', '17:48', '18:48', '19:48',
+    '20:48', '21:48', '22:48', '23:48',
   ],
 };
 
@@ -66,7 +81,8 @@ export function buildStaticTrains({ now = new Date(), windowHours = WINDOW_HOURS
         if (departureTime < windowStart || departureTime > windowEnd) continue;
 
         const scheduledDeparture = departureDate.toISOString();
-        const scheduledArrival = new Date(departureTime + STATIC_DURATION_MIN * MS_MIN).toISOString();
+        const durationMin = dirInfo.typicalDurationMin ?? 45;
+        const scheduledArrival = new Date(departureTime + durationMin * MS_MIN).toISOString();
         const serviceDate = toServiceDate(departureDate);
         const trainNumber = null; // not known offline
 

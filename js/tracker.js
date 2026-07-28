@@ -2,7 +2,7 @@
 // per train via the bottom sheet, and persists it with js/storage.js.
 
 import { fetchTrains } from './api.js';
-import { DIRECTIONS, DIRECTION_IDS } from './config.js';
+import { DIRECTIONS, DIRECTION_IDS, directionMatches } from './config.js';
 import {
   toHHMM,
   actualArrival,
@@ -20,10 +20,44 @@ import { initAuthGate } from './auth-gate.js';
 const QUICK_PICKS = [0, 2, 5, 10, 15, 20, 30, 45, 60];
 const REFRESH_MS = 60000;
 
+// ---------------------------------------------------------------------------
+// Preferences (persisted): which axis/hub the train list is filtered to.
+// ---------------------------------------------------------------------------
+
+const PREFS_KEY = 'dbt.tracker.prefs.v1';
+
+const DEFAULT_PREFS = {
+  axis: 'ALL', // 'ALL' | 'TO_MUC' | 'TO_RO'
+  hub: 'ALL', // 'ALL' | 'HBF' | 'OST'
+};
+
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return { ...DEFAULT_PREFS };
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_PREFS, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+  } catch (err) {
+    console.warn('[tracker] could not read prefs, using defaults', err);
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+function savePrefs(prefs) {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch (err) {
+    console.warn('[tracker] could not persist prefs', err);
+  }
+}
+
+let prefs = loadPrefs();
+
 const els = {
   freshness: document.getElementById('freshness'),
   refreshBtn: document.getElementById('refreshBtn'),
   directionControl: document.getElementById('directionControl'),
+  hubControl: document.getElementById('hubControl'),
   notice: document.getElementById('notice'),
   noticeText: document.getElementById('noticeText'),
   skeletonWrap: document.getElementById('skeletonWrap'),
@@ -65,7 +99,6 @@ const state = {
   error: null,
   fetchedAt: null,
   loading: true,
-  filter: 'ALL',
   sheetOpen: false,
 };
 
@@ -168,8 +201,7 @@ function renderNotice() {
 }
 
 function getFilteredTrains() {
-  if (state.filter === 'ALL') return state.trains;
-  return state.trains.filter((t) => t.direction === state.filter);
+  return state.trains.filter((t) => directionMatches(t.direction, { axis: prefs.axis, hub: prefs.hub }));
 }
 
 function renderList() {
@@ -185,7 +217,6 @@ function renderList() {
 
   const now = Date.now();
   for (const dirId of DIRECTION_IDS) {
-    if (state.filter !== 'ALL' && state.filter !== dirId) continue;
     const groupTrains = filtered.filter((t) => t.direction === dirId);
     if (groupTrains.length === 0) continue;
     els.listRoot.appendChild(buildGroup(dirId, groupTrains, now));
@@ -451,16 +482,34 @@ function showToast(message) {
 // Static event wiring (attached once)
 // ---------------------------------------------------------------------------
 
+function updateFilterControlStates() {
+  for (const b of els.directionControl.children) {
+    b.classList.toggle('is-active', b.dataset.value === prefs.axis);
+  }
+  for (const b of els.hubControl.children) {
+    b.classList.toggle('is-active', b.dataset.value === prefs.hub);
+  }
+}
+
 function wireStaticEvents() {
+  updateFilterControlStates();
   els.refreshBtn.addEventListener('click', () => loadTrains());
 
   els.directionControl.addEventListener('click', (event) => {
     const btn = event.target.closest('button[data-value]');
     if (!btn) return;
-    state.filter = btn.dataset.value;
-    for (const b of els.directionControl.children) {
-      b.classList.toggle('is-active', b === btn);
-    }
+    prefs.axis = btn.dataset.value;
+    savePrefs(prefs);
+    updateFilterControlStates();
+    renderList();
+  });
+
+  els.hubControl.addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-value]');
+    if (!btn) return;
+    prefs.hub = btn.dataset.value;
+    savePrefs(prefs);
+    updateFilterControlStates();
     renderList();
   });
 

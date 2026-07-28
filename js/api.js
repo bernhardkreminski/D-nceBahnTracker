@@ -170,10 +170,21 @@ async function fetchTransitousBoth(now, windowHours) {
 // Which substring in `destination`/`via` marks a departure as heading the right
 // way. via lists only the stops still ahead, so this correctly excludes trains
 // that already passed through the counterpart station earlier in their journey.
-const COUNTERPART_NEEDLE = { RO_MU: 'münchen', MU_RO: 'rosenheim' };
+//
+// "münchen hbf" and "münchen ost" must be matched separately: a bare "münchen"
+// would make every Hbf-bound train also count as an Ost arrival and vice versa.
+// A Rosenheim -> Hbf train legitimately matches both (it calls at Ost on the
+// way), and that is intended -- the two are separate loggable journeys.
+const COUNTERPART_NEEDLE = {
+  RO_MU: 'münchen hbf',
+  RO_MO: 'münchen ost',
+  MU_RO: 'rosenheim',
+  MO_RO: 'rosenheim',
+};
 
 function boardEntryMatchesDirection(dep, direction) {
   const needle = COUNTERPART_NEEDLE[direction];
+  if (!needle) return false;
   const haystack = [dep.destination, ...(Array.isArray(dep.via) ? dep.via : [])]
     .filter(Boolean)
     .join(' | ')
@@ -212,8 +223,10 @@ function parseDbfBoard(data, direction, now, windowHours) {
     if (departureTime < windowStart || departureTime > windowEnd) continue;
 
     const scheduledDeparture = departureDate.toISOString();
-    // The board has no arrival time at the destination station -- only estimate it.
-    const scheduledArrival = new Date(departureTime + FALLBACK_DURATION_MIN * MS_MIN).toISOString();
+    // The board has no arrival time at the destination station -- only estimate
+    // it, using this connection's own typical runtime (Ost is ~8 min closer).
+    const durationMin = dir.typicalDurationMin ?? FALLBACK_DURATION_MIN;
+    const scheduledArrival = new Date(departureTime + durationMin * MS_MIN).toISOString();
     const serviceDate = toServiceDate(departureDate);
     const trainNumber = dep.trainNumber ? String(dep.trainNumber) : null;
 
@@ -227,7 +240,7 @@ function parseDbfBoard(data, direction, now, windowHours) {
       serviceDate,
       scheduledDeparture,
       scheduledArrival,
-      scheduledDurationMin: FALLBACK_DURATION_MIN,
+      scheduledDurationMin: durationMin,
       departureDelayMin: typeof dep.delayDeparture === 'number' ? dep.delayDeparture : null,
       arrivalDelayMin: null, // unknown -- scheduledArrival above is only an estimate
       cancelled: Boolean(dep.isCancelled),

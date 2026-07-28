@@ -1,7 +1,15 @@
 # DänceBahnTracker
 
 Mobile-first web app to track commuter train delays on the **RE5** between
-**Rosenheim** and **München Hbf**, and to see what those delays add up to.
+**Rosenheim** and Munich, and to see what those delays add up to.
+
+Four connections are tracked: Rosenheim ↔ **München Hbf** and Rosenheim ↔
+**München Ost**, each way. RE5 calls at Ost on its way to and from Hbf, so the
+same physical train serves both — but the journeys genuinely differ (Ost is
+~8 minutes closer to Rosenheim, and coming back the Ost departure is ~9 minutes
+after the Hbf one). Each is therefore its own connection with its own times and
+its own logged trips, and both the tracker and the statistics can be filtered by
+**Richtung** (nach München / nach Rosenheim) and **Bahnhof** (Hbf / Ost).
 
 Static site, no build step, no backend, no dependencies — plain HTML, CSS and
 ES modules, hosted on GitHub Pages.

@@ -2,7 +2,7 @@
 // No dependencies, no external requests -- everything derives from storage.js
 // via the shared helpers in model.js so the numbers always match the tracker page.
 
-import { DIRECTIONS } from './config.js';
+import { DIRECTIONS, DIRECTION_IDS, directionMatches } from './config.js';
 import {
   toServiceDate,
   toHHMM,
@@ -36,16 +36,36 @@ const PREFS_KEY = 'dbt.stats.prefs.v1';
 const DEFAULT_PREFS = {
   grouping: 'day', // 'day' | 'week' | 'month' | 'year'
   range: '30d', // '7d' | '30d' | '3m' | '12m' | 'all'
-  direction: 'ALL', // 'ALL' | 'RO_MU' | 'MU_RO'
+  axis: 'ALL', // 'ALL' | 'TO_MUC' | 'TO_RO'
+  hub: 'ALL', // 'ALL' | 'HBF' | 'OST'
   metric: 'arrivalDelay', // 'arrivalDelay' | 'extraTime' | 'actualDuration' | 'count'
   cancelledMode: 'include', // 'include' | 'exclude'
 };
+
+/**
+ * Older versions stored a single `direction` field holding a direction id
+ * ('RO_MU' | 'MU_RO' | 'ALL') rather than today's axis/hub pair. Map it
+ * forward so a pref saved before the second commuter connection was added
+ * still loads correctly.
+ */
+function migrateLegacyPrefs(parsed) {
+  if (!parsed || typeof parsed !== 'object' || !('direction' in parsed)) return parsed;
+  const { direction, ...rest } = parsed;
+  const migrated = { ...rest };
+  if (migrated.axis === undefined) {
+    if (direction === 'RO_MU') migrated.axis = 'TO_MUC';
+    else if (direction === 'MU_RO') migrated.axis = 'TO_RO';
+    else migrated.axis = 'ALL';
+  }
+  if (migrated.hub === undefined) migrated.hub = 'ALL';
+  return migrated;
+}
 
 function loadPrefs() {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return { ...DEFAULT_PREFS };
-    const parsed = JSON.parse(raw);
+    const parsed = migrateLegacyPrefs(JSON.parse(raw));
     return { ...DEFAULT_PREFS, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
   } catch (err) {
     console.warn('[stats] could not read prefs, using defaults', err);
@@ -344,8 +364,9 @@ function render() {
   const startService = startDate ? toServiceDate(startDate) : null;
 
   const rangeFiltered = all.filter((e) => !startService || e.serviceDate >= startService);
-  const directionFiltered =
-    prefs.direction === 'ALL' ? rangeFiltered : rangeFiltered.filter((e) => e.direction === prefs.direction);
+  const directionFiltered = rangeFiltered.filter((e) =>
+    directionMatches(e.direction, { axis: prefs.axis, hub: prefs.hub })
+  );
   const baseFiltered = directionFiltered; // range + direction, cancellations still included
   const statsFiltered =
     prefs.cancelledMode === 'exclude' ? baseFiltered.filter((e) => !e.cancelled) : baseFiltered;
@@ -537,22 +558,31 @@ function renderHistogram(entries) {
 function renderDirectionChart(rangeFiltered) {
   const container = els.directionChart;
   clear(container);
+  // Deliberately ignores the Richtung/Bahnhof filters -- this chart always
+  // compares all four directions against each other, honouring only the
+  // range and the cancellation toggle.
   const entries = prefs.cancelledMode === 'exclude' ? rangeFiltered.filter((e) => !e.cancelled) : rangeFiltered;
   if (!entries.length) {
     renderEmptyHint(container, 'Keine Fahrten im gewählten Zeitraum.');
     return;
   }
-  const rows = ['RO_MU', 'MU_RO'].map((id) => {
+  const rows = DIRECTION_IDS.map((id) => {
     const group = entries.filter((e) => e.direction === id);
     const avg = group.length ? average(group.map(lostTimeMin)) : 0;
     return { id, count: group.length, avg };
-  });
+  }).filter((r) => r.count > 0); // drop directions with zero trips rather than showing empty bars
+
+  if (!rows.length) {
+    renderEmptyHint(container, 'Keine Fahrten im gewählten Zeitraum.');
+    return;
+  }
+
   const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.avg)));
   for (const r of rows) {
     const label = `${directionLabel(r.id)} (${r.count})`;
-    const displayValue = r.count ? formatSignedMinutes(r.avg) : '–';
+    const displayValue = formatSignedMinutes(r.avg);
     container.appendChild(
-      buildBarRow({ label, displayValue, value: r.avg, maxAbs, severity: r.count ? delaySeverity(r.avg) : undefined })
+      buildBarRow({ label, displayValue, value: r.avg, maxAbs, severity: delaySeverity(r.avg) })
     );
   }
 }
@@ -800,7 +830,8 @@ function updateActive(containerId, prefsKey, activeClass) {
 function updateControlStates() {
   updateActive('groupingControl', 'grouping', 'is-active');
   updateActive('rangeControl', 'range', 'is-active');
-  updateActive('directionControl', 'direction', 'is-active');
+  updateActive('directionControl', 'axis', 'is-active');
+  updateActive('hubControl', 'hub', 'is-active');
   updateActive('metricControl', 'metric', 'is-active');
   updateActive('cancelledControl', 'cancelledMode', 'is-active');
 }
@@ -864,7 +895,8 @@ function init() {
   buildChips('rangeControl', RANGE_OPTIONS, 'range');
   buildChips('metricControl', METRIC_OPTIONS, 'metric');
   wireSegmented('groupingControl', 'grouping');
-  wireSegmented('directionControl', 'direction');
+  wireSegmented('directionControl', 'axis');
+  wireSegmented('hubControl', 'hub');
   wireSegmented('cancelledControl', 'cancelledMode');
   wireDataManagement();
   // A session ending (sign-out, or a refresh token the server rejected) raises

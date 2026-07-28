@@ -26,10 +26,21 @@
 <main class="container" id="main">
 
   <section class="section" id="filterSection">
-    <div class="segmented" id="directionControl" role="group" aria-label="Richtung">
-      <button type="button" data-value="ALL" class="is-active">Beide</button>
-      <button type="button" data-value="RO_MU">→ München</button>
-      <button type="button" data-value="MU_RO">→ Rosenheim</button>
+    <div class="field">
+      <div class="label">Richtung</div>
+      <div class="segmented" id="directionControl" role="group" aria-label="Richtung">
+        <button type="button" data-value="ALL" class="is-active">Beide</button>
+        <button type="button" data-value="TO_MUC">→ München</button>
+        <button type="button" data-value="TO_RO">→ Rosenheim</button>
+      </div>
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <div class="label">Bahnhof</div>
+      <div class="segmented" id="hubControl" role="group" aria-label="Bahnhof">
+        <button type="button" data-value="ALL" class="is-active">Alle</button>
+        <button type="button" data-value="HBF">Hbf</button>
+        <button type="button" data-value="OST">Ost</button>
+      </div>
     </div>
   </section>
 
