@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DänceBahnTracker">
+  <!-- Source artwork for the large icons (home screen, manifest). Full-bleed:
+       iOS and Android apply their own mask, and an apple-touch-icon with alpha
+       gets composited over black. The motif stays well inside the centre so
+       neither mask can clip it. Small tab icons use favicon.svg instead, which
+       drops the lights and wheels because they turn to mush at 16px. -->
+  <rect width="512" height="512" fill="#b8121b"/>
+  <path d="M136 232C136 158.2 189.7 108 256 108s120 50.2 120 124v148a24 24 0 0 1-24 24H160a24 24 0 0 1-24-24z" fill="#fff"/>
+  <rect x="172" y="158" width="168" height="104" rx="28" fill="#b8121b"/>
+  <rect x="156" y="298" width="200" height="74" rx="22" fill="#b8121b"/>
+  <circle cx="200" cy="335" r="21" fill="#fff"/>
+  <circle cx="312" cy="335" r="21" fill="#fff"/>
+  <rect x="150" y="404" width="60" height="20" rx="10" fill="#fff"/>
+  <rect x="302" y="404" width="60" height="20" rx="10" fill="#fff"/>
+</svg>

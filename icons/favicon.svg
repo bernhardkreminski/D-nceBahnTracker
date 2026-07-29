@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DänceBahnTracker">
+  <!-- Tab-icon artwork. Deliberately simpler than app-icon.svg: at 16px the
+       headlights and wheels of the full mark blur into an unreadable smudge,
+       so this keeps only the silhouette, the windscreen and one band. -->
+  <rect width="512" height="512" rx="96" fill="#b8121b"/>
+  <path d="M112 236C112 148 176 92 256 92s144 56 144 144v168a28 28 0 0 1-28 28H140a28 28 0 0 1-28-28z" fill="#fff"/>
+  <rect x="152" y="150" width="208" height="124" rx="30" fill="#b8121b"/>
+  <rect x="152" y="316" width="208" height="60" rx="26" fill="#b8121b"/>
+</svg>
