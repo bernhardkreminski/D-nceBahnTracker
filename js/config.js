@@ -112,8 +112,18 @@ export function directionMatches(directionId, { axis = 'ALL', hub = 'ALL' } = {}
 // Trains are shown when |departure - now| <= WINDOW_HOURS.
 export const WINDOW_HOURS = 2;
 
-// Only Regional Express services are relevant for this commute.
-export const LINE_FILTER = /^RE/i;
+// The lines actually worth commuting on between Rosenheim and Munich. An
+// explicit allowlist rather than a pattern like /^R[EB]/, because RB58 also
+// calls at Rosenheim but runs to Holzkirchen on a different corridor, and a
+// loose pattern would quietly pull it in.
+//
+// RE5  -- fast service, Rosenheim <-> München (continues to Salzburg)
+// RB54 -- stopping service on the same corridor (continues to Kufstein)
+export const TRACKED_LINES = ['RE5', 'RB54'];
+
+export function isTrackedLine(line) {
+  return TRACKED_LINES.includes(String(line || '').toUpperCase());
+}
 
 // Typical scheduled runtime, used only where a source gives no arrival time.
 // Prefer DIRECTIONS[id].typicalDurationMin; this is the last-resort default.

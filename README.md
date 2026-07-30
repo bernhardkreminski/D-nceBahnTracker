@@ -1,11 +1,21 @@
 # DänceBahnTracker
 
-Mobile-first web app to track commuter train delays on the **RE5** between
-**Rosenheim** and Munich, and to see what those delays add up to.
+Mobile-first web app to track commuter train delays between **Rosenheim** and
+Munich, and to see what those delays add up to.
+
+Two lines are tracked, both run by BRB:
+
+- **RE5** — the fast service, continuing to Salzburg
+- **RB54** — the stopping service on the same corridor, continuing to Kufstein
+  (a few minutes slower)
+
+`RB58` also calls at Rosenheim but runs to Holzkirchen on a different corridor,
+so it is deliberately excluded — `TRACKED_LINES` in
+[js/config.js](js/config.js) is an explicit allowlist rather than a pattern.
 
 Four connections are tracked: Rosenheim ↔ **München Hbf** and Rosenheim ↔
-**München Ost**, each way. RE5 calls at Ost on its way to and from Hbf, so the
-same physical train serves both — but the journeys genuinely differ (Ost is
+**München Ost**, each way. Both lines call at Ost on the way to and from Hbf, so
+the same physical train serves both — but the journeys genuinely differ (Ost is
 ~8 minutes closer to Rosenheim, and coming back the Ost departure is ~9 minutes
 after the Hbf one). Each is therefore its own connection with its own times and
 its own logged trips, and both the tracker and the statistics can be filtered by
@@ -44,7 +54,7 @@ fallback so the page is never empty:
 2. **[dbf.finalrewind.org](https://dbf.finalrewind.org/)** — departure board with
    live delays. Arrival times are estimated from the typical runtime, which the
    UI labels as `geschätzt`.
-3. **`js/timetable.js`** — a hardcoded approximate RE5 timetable, used only when
+3. **`js/timetable.js`** — a hardcoded approximate RE5/RB54 timetable, used only when
    both live sources are unreachable. No delay data.
 
 Both live services are free community projects without an SLA, so the fallback

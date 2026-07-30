@@ -11,8 +11,6 @@
 import { DIRECTIONS, WINDOW_HOURS } from './config.js';
 import { buildTrainId, toServiceDate, minutesBetween, MS_MIN } from './model.js';
 
-const LINE = 'RE5';
-
 /**
  * Approximate hourly clock-face departures, local "HH:MM", no live data.
  *
@@ -21,27 +19,38 @@ const LINE = 'RE5';
  * departures are identical and only the runtime differs. Coming back they are a
  * separate departure roughly nine minutes after Hbf, because the train has to
  * travel Hbf -> Ost first.
+ *
+ * RB54 is the stopping service on the same corridor, so it takes a few minutes
+ * longer than RE5 and carries its own runtime.
  */
+const HOURS = ['04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14',
+  '15', '16', '17', '18', '19', '20', '21', '22', '23'];
+
+/** Hourly departures at a fixed minute, e.g. everyHour('33', 'RB54', 48). */
+function everyHour(minute, line, durationMin) {
+  return HOURS.map((h) => ({ time: `${h}:${minute}`, line, durationMin }));
+}
+
 export const STATIC_TIMETABLE = {
   RO_MU: [
-    '04:35', '05:35', '06:32', '07:33', '08:32', '09:32', '10:32', '11:32',
-    '12:32', '13:32', '14:32', '15:32', '16:32', '17:33', '18:32', '19:33',
-    '20:32', '21:32', '22:32', '23:35',
+    ...['04:35', '05:35', '06:32', '07:33', '08:32', '09:32', '10:32', '11:32',
+      '12:32', '13:32', '14:32', '15:32', '16:32', '17:33', '18:32', '19:33',
+      '20:32', '21:32', '22:32', '23:35'].map((time) => ({ time, line: 'RE5', durationMin: 45 })),
+    ...everyHour('33', 'RB54', 48),
   ],
   RO_MO: [
-    '04:35', '05:35', '06:32', '07:33', '08:32', '09:32', '10:32', '11:32',
-    '12:32', '13:32', '14:32', '15:32', '16:32', '17:33', '18:32', '19:33',
-    '20:32', '21:32', '22:32', '23:35',
+    ...['04:35', '05:35', '06:32', '07:33', '08:32', '09:32', '10:32', '11:32',
+      '12:32', '13:32', '14:32', '15:32', '16:32', '17:33', '18:32', '19:33',
+      '20:32', '21:32', '22:32', '23:35'].map((time) => ({ time, line: 'RE5', durationMin: 37 })),
+    ...everyHour('33', 'RB54', 39),
   ],
   MU_RO: [
-    '04:39', '05:39', '06:39', '07:39', '08:39', '09:39', '10:39', '11:39',
-    '12:39', '13:39', '14:39', '15:39', '16:39', '17:39', '18:39', '19:39',
-    '20:39', '21:39', '22:39', '23:39',
+    ...everyHour('39', 'RE5', 45),
+    ...everyHour('36', 'RB54', 48),
   ],
   MO_RO: [
-    '04:48', '05:48', '06:48', '07:48', '08:48', '09:48', '10:48', '11:48',
-    '12:48', '13:48', '14:48', '15:48', '16:48', '17:48', '18:48', '19:48',
-    '20:48', '21:48', '22:48', '23:48',
+    ...everyHour('48', 'RE5', 37),
+    ...everyHour('46', 'RB54', 39),
   ],
 };
 
@@ -75,20 +84,21 @@ export function buildStaticTrains({ now = new Date(), windowHours = WINDOW_HOURS
     if (!dirInfo) continue;
     for (const offset of dayOffsets) {
       const base = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
-      for (const hhmm of times) {
-        const departureDate = dateAtLocalTime(base, hhmm);
+      for (const entry of times) {
+        const departureDate = dateAtLocalTime(base, entry.time);
         const departureTime = departureDate.getTime();
         if (departureTime < windowStart || departureTime > windowEnd) continue;
 
         const scheduledDeparture = departureDate.toISOString();
-        const durationMin = dirInfo.typicalDurationMin ?? 45;
+        const durationMin = entry.durationMin ?? dirInfo.typicalDurationMin ?? 45;
         const scheduledArrival = new Date(departureTime + durationMin * MS_MIN).toISOString();
         const serviceDate = toServiceDate(departureDate);
-        const trainNumber = null; // not known offline
 
         trains.push({
-          id: buildTrainId({ direction: dir, serviceDate, trainNumber, scheduledDeparture }),
-          line: LINE,
+          // No train number offline, so the line stands in for it -- otherwise
+          // two lines leaving at the same minute would collide on one id.
+          id: buildTrainId({ direction: dir, serviceDate, trainNumber: entry.line, scheduledDeparture }),
+          line: entry.line,
           trainNumber: '',
           direction: dir,
           fromName: dirInfo.from.name,

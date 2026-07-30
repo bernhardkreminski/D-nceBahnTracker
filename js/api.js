@@ -1,4 +1,4 @@
-// Live train data for the RE5 (Meridian/BRB), Rosenheim <-> München Hbf, with a
+// Live train data for the tracked BRB lines (RE5, RB54) between Rosenheim and
 // three-tier fallback: transitous (journey planner, best) -> dbf.finalrewind.org
 // (departure board, no destination arrival) -> js/timetable.js (offline, no
 // network at all). fetchTrains() NEVER throws; it always resolves to a usable
@@ -9,7 +9,7 @@
 // tier contributing to the whole result ("worst source wins"), so the UI can show
 // one global notice when any part of the picture is degraded.
 
-import { STATIONS, DIRECTIONS, DIRECTION_IDS, WINDOW_HOURS, LINE_FILTER, FALLBACK_DURATION_MIN } from './config.js';
+import { STATIONS, DIRECTIONS, DIRECTION_IDS, WINDOW_HOURS, isTrackedLine, FALLBACK_DURATION_MIN } from './config.js';
 import { buildTrainId, toServiceDate, minutesBetween, MS_MIN } from './model.js';
 import { buildStaticTrains } from './timetable.js';
 
@@ -37,11 +37,12 @@ async function fetchJSON(url) {
 }
 
 /**
- * Pull a normalised "RE<n>" line name out of whatever a source calls it:
- * "BRB RE5" -> "RE5", "RE5 (79038)" -> "RE5", "RE RE1" -> "RE1", "RB54" -> null.
+ * Pull a normalised line name out of whatever a source calls it:
+ * "BRB RE5" -> "RE5", "RE5 (79038)" -> "RE5", "BRB RB54" -> "RB54".
+ * Which of those are actually tracked is decided by isTrackedLine().
  */
 function normaliseLine(raw) {
-  const m = /RE\s?\d+/i.exec(raw || '');
+  const m = /R[EB]\s?\d+/i.exec(raw || '');
   return m ? m[0].replace(/\s+/, '').toUpperCase() : null;
 }
 
@@ -71,7 +72,7 @@ function parseTransitousRoute(routeShortName) {
 
 /**
  * Fetch one direction's itineraries from transitous, keep only direct
- * (no-transfer) single-leg REGIONAL_RAIL journeys whose line passes LINE_FILTER,
+ * (no-transfer) single-leg REGIONAL_RAIL journeys whose line is tracked,
  * and turn them into Train objects. Pages forward with pageCursor if the first
  * page doesn't yet reach the end of the window.
  */
@@ -106,7 +107,7 @@ async function fetchTransitousDirection(direction, now, windowHours) {
       if (!leg.scheduledStartTime || !leg.scheduledEndTime) continue;
 
       const { line, trainNumber } = parseTransitousRoute(leg.routeShortName);
-      if (!line || !LINE_FILTER.test(line)) continue;
+      if (!line || !isTrackedLine(line)) continue;
 
       const scheduledDeparture = leg.scheduledStartTime;
       const departureTime = new Date(scheduledDeparture).getTime();
@@ -175,21 +176,34 @@ async function fetchTransitousBoth(now, windowHours) {
 // would make every Hbf-bound train also count as an Ost arrival and vice versa.
 // A Rosenheim -> Hbf train legitimately matches both (it calls at Ost on the
 // way), and that is intended -- the two are separate loggable journeys.
-const COUNTERPART_NEEDLE = {
-  RO_MU: 'münchen hbf',
-  RO_MO: 'münchen ost',
-  MU_RO: 'rosenheim',
-  MO_RO: 'rosenheim',
+// Heading towards Rosenheim needs more than the literal station name: dbf
+// abbreviates `via` to the next few stops, so an RB54 leaving München Hbf shows
+// via ['München Ost','Grafing Bahnhof','Aßling'] and destination 'Kufstein' --
+// Rosenheim appears nowhere, and matching on it alone would silently drop the
+// whole line. Matching the terminus instead is safe here only because
+// TRACKED_LINES is an explicit allowlist: RE5 and RB54 both reach these places
+// through Rosenheim, whereas the Salzburg services that run via Mühldorf are
+// other lines and never get this far.
+const COUNTERPART_NEEDLES = {
+  RO_MU: ['münchen hbf'],
+  // Ost also accepts an Hbf-bound train: `via` gets truncated to the next few
+  // stops, so a Rosenheim -> Hbf run often never mentions Ost even though it
+  // calls there. Every tracked line reaches Hbf via Ost, so this holds. The
+  // reverse shortcut would NOT be safe -- a service terminating at Ost must not
+  // be counted as reaching Hbf -- which is why RO_MU stays strict.
+  RO_MO: ['münchen ost', 'münchen hbf'],
+  MU_RO: ['rosenheim', 'kufstein', 'salzburg', 'wörgl', 'innsbruck', 'bad endorf', 'prien', 'traunstein', 'freilassing'],
+  MO_RO: ['rosenheim', 'kufstein', 'salzburg', 'wörgl', 'innsbruck', 'bad endorf', 'prien', 'traunstein', 'freilassing'],
 };
 
 function boardEntryMatchesDirection(dep, direction) {
-  const needle = COUNTERPART_NEEDLE[direction];
-  if (!needle) return false;
+  const needles = COUNTERPART_NEEDLES[direction];
+  if (!needles) return false;
   const haystack = [dep.destination, ...(Array.isArray(dep.via) ? dep.via : [])]
     .filter(Boolean)
     .join(' | ')
     .toLowerCase();
-  return haystack.includes(needle);
+  return needles.some((n) => haystack.includes(n));
 }
 
 /** Reconstruct a full local Date from dbf's date-less "HH:MM", handling midnight rollover. */
@@ -215,7 +229,7 @@ function parseDbfBoard(data, direction, now, windowHours) {
   for (const dep of departures) {
     if (!dep.scheduledDeparture) continue; // train terminates here, no onward departure to report
     const line = normaliseLine(dep.train);
-    if (!line || !LINE_FILTER.test(line)) continue;
+    if (!line || !isTrackedLine(line)) continue;
     if (!boardEntryMatchesDirection(dep, direction)) continue;
 
     const departureDate = reconstructLocalTime(now, dep.scheduledDeparture);
