@@ -1,5 +1,6 @@
 // Live train data for the tracked BRB lines (RE5, RB54) between Rosenheim and
-// three-tier fallback: transitous (journey planner, best) -> dbf.finalrewind.org
+// Munich (Hbf and Ost), with a three-tier fallback:
+// transitous (journey planner, best) -> dbf.finalrewind.org
 // (departure board, no destination arrival) -> js/timetable.js (offline, no
 // network at all). fetchTrains() NEVER throws; it always resolves to a usable
 // result and reports what happened via `degraded`/`error`.

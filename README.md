@@ -27,8 +27,8 @@ ES modules, hosted on GitHub Pages.
 ## Pages
 
 **`index.html` — Fahrten (tracker)**
-Lists RE trains in both directions that depart within ±2 hours of the current
-time, with live delay information. Tapping a train opens a sheet to log the
+Lists RE5 and RB54 departures on all four connections within ±2 hours of the
+current time, with live delay information. Tapping a train opens a sheet to log the
 delay: arrival delay (stepper plus one-tap quick picks), optional departure
 delay, a cancellation flag and a note. Entries are saved immediately and
 already-logged trains are marked in the list.
