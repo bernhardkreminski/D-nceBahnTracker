@@ -123,6 +123,16 @@ body {
 
 .icon-btn:active { transform: scale(0.96); }
 
+/* Fits inside a table row without stretching it. */
+.icon-btn--sm {
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 13px;
+}
+
+.row-actions { display: flex; gap: 6px; }
+
 /* ---------- Layout ---------- */
 
 .container {
@@ -377,6 +387,55 @@ body {
 
 .btn-row { display: flex; gap: 10px; }
 .btn-row > * { flex: 1; }
+
+/* Understated text action for secondary things that must not compete with the
+   train list -- currently only "Frühere Fahrt nachtragen". */
+.link-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 4px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link-btn:active { color: var(--text-dim); }
+
+.footer-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+/* ---------- Back-dated view ---------- */
+
+/* Shown in place of "now" while the train list is anchored to a past moment. */
+.anchor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 8px 7px 12px;
+  margin-bottom: 12px;
+}
+
+.anchor-bar-btn {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+}
 
 /* ---------- Sheet (bottom modal) ---------- */
 

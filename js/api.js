@@ -318,9 +318,15 @@ function buildErrorMessage(sourcesUsed, missingDirections) {
  * Tries transitous first, fills any gap from dbf.finalrewind.org, and finally
  * falls back to the offline static timetable. Never throws.
  *
+ * `useDepartureBoard` must be turned off whenever `now` is not the actual
+ * current time: dbf always serves the board for *today, right now*, and the
+ * parser dates those HH:MM strings against whatever `now` it is handed -- for a
+ * back-dated lookup that would invent today's trains on some other day.
+ * transitous takes an explicit timestamp and is safe either way.
+ *
  * @returns {Promise<{trains: import('./model.js').Train[], source: 'transitous'|'dbf'|'static', degraded: boolean, error: string|null, fetchedAt: string}>}
  */
-export async function fetchTrains({ now = new Date(), windowHours = WINDOW_HOURS } = {}) {
+export async function fetchTrains({ now = new Date(), windowHours = WINDOW_HOURS, useDepartureBoard = true } = {}) {
   const fetchedAt = new Date().toISOString();
 
   try {
@@ -340,10 +346,12 @@ export async function fetchTrains({ now = new Date(), windowHours = WINDOW_HOURS
     // At least one direction came back empty from transitous -- try to fill the
     // gap from the departure-board fallback before resorting to the static plan.
     let dbfByDirection = { RO_MU: [], MU_RO: [] };
-    try {
-      dbfByDirection = await fetchDbfBoth(now, windowHours);
-    } catch (err) {
-      console.warn('[api] dbf-Fallback fehlgeschlagen', err);
+    if (useDepartureBoard) {
+      try {
+        dbfByDirection = await fetchDbfBoth(now, windowHours);
+      } catch (err) {
+        console.warn('[api] dbf-Fallback fehlgeschlagen', err);
+      }
     }
 
     const byDirection = {};

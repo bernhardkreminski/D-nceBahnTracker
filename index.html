@@ -58,6 +58,12 @@
     </div>
   </section>
 
+  <!-- Only visible while the list is anchored to a past time (see #pastPanel). -->
+  <div class="anchor-bar" id="anchorBar" hidden>
+    <span id="anchorText"></span>
+    <button type="button" class="btn btn--ghost anchor-bar-btn" id="anchorResetBtn">Jetzt</button>
+  </div>
+
   <div class="notice" id="notice" hidden style="display:none">
     <span aria-hidden="true">⚠️</span>
     <span id="noticeText"></span>
@@ -73,7 +79,7 @@
   <div class="empty" id="emptyState" hidden>
     <span class="empty-icon" aria-hidden="true">🚆</span>
     <div class="empty-title">Keine Fahrten im Zeitfenster</div>
-    <p class="empty-text">
+    <p class="empty-text" id="emptyText">
       Aktuell liegen keine Züge innerhalb der nächsten bzw. letzten 2 Stunden vor.
       Zieh zum Aktualisieren oder komm später wieder.
     </p>
@@ -81,62 +87,40 @@
 
   <div id="trainListRoot"></div>
 
+  <!-- Deliberately understated: nachtragen is the rare case, the live list is
+       the everyday one. Kept below the list so it never competes with it. -->
+  <div class="footer-actions">
+    <button type="button" class="link-btn" id="pastToggle" aria-expanded="false" aria-controls="pastPanel">
+      Frühere Fahrt nachtragen
+    </button>
+  </div>
+
+  <section class="section" id="pastPanel" hidden>
+    <div class="card card-pad">
+      <div class="field">
+        <label class="label" for="pastDate">Datum</label>
+        <input class="input" type="date" id="pastDate">
+      </div>
+      <div class="field">
+        <label class="label" for="pastTime">Uhrzeit (ungefähr)</label>
+        <input class="input" type="time" id="pastTime" step="300">
+      </div>
+      <div class="btn-row">
+        <button type="button" class="btn btn--ghost" id="pastCancelBtn">Abbrechen</button>
+        <button type="button" class="btn btn--primary" id="pastShowBtn">Fahrten anzeigen</button>
+      </div>
+      <p class="hint" style="margin-top:10px;">
+        Zeigt die Züge im Zeitfenster von ±2 Stunden um diese Uhrzeit. Für weiter
+        zurückliegende Tage liegen unter Umständen nur Fahrplandaten ohne
+        Live-Verspätung vor.
+      </p>
+    </div>
+  </section>
+
 </main>
 
-<!-- Delay entry sheet. Populated and shown/hidden by js/tracker.js. -->
-<div class="sheet" id="entrySheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
-  <button type="button" class="sheet-backdrop" id="sheetBackdrop" aria-label="Schließen"></button>
-  <div class="sheet-panel" id="sheetPanel" tabindex="-1">
-    <div class="sheet-grabber" aria-hidden="true"></div>
-    <h2 class="sheet-title" id="sheetTitle">Zug</h2>
-    <p class="sheet-sub" id="sheetSub"></p>
-
-    <div class="field">
-      <div class="label" id="arrivalLabel">Ankunftsverspätung (Minuten)</div>
-      <div class="stepper">
-        <button type="button" id="arrMinus" aria-label="Minus 1 Minute">−</button>
-        <input class="input" type="number" inputmode="numeric" id="arrInput" value="0" aria-labelledby="arrivalLabel">
-        <button type="button" id="arrPlus" aria-label="Plus 1 Minute">+</button>
-      </div>
-      <div class="chips" id="arrChips" role="group" aria-label="Schnellauswahl Ankunftsverspätung"></div>
-    </div>
-
-    <button type="button" class="btn btn--ghost btn--block" id="detailsToggle" aria-expanded="false" aria-controls="departureField">
-      Details (Abfahrtsverspätung) ▾
-    </button>
-
-    <div class="field" id="departureField" hidden style="margin-top:14px;">
-      <div class="label" id="departureLabel">Abfahrtsverspätung (Minuten)</div>
-      <div class="stepper">
-        <button type="button" id="depMinus" aria-label="Minus 1 Minute">−</button>
-        <input class="input" type="number" inputmode="numeric" id="depInput" value="0" aria-labelledby="departureLabel">
-        <button type="button" id="depPlus" aria-label="Plus 1 Minute">+</button>
-      </div>
-    </div>
-
-    <div class="field" style="margin-top:14px;">
-      <label class="checkline">
-        <input type="checkbox" id="cancelledCheckbox">
-        Zug ist ausgefallen
-      </label>
-    </div>
-
-    <div class="field">
-      <label class="label" for="noteTextarea">Notiz</label>
-      <textarea class="textarea" id="noteTextarea" placeholder="Optional…"></textarea>
-    </div>
-
-    <div class="card card-pad" id="previewCard">
-      <p class="hint" id="previewText" style="margin:0;">…</p>
-    </div>
-
-    <div class="btn-row" style="margin-top:14px;">
-      <button type="button" class="btn btn--ghost" id="cancelBtn">Abbrechen</button>
-      <button type="button" class="btn btn--primary" id="saveBtn">Speichern</button>
-    </div>
-    <button type="button" class="btn btn--danger btn--block" id="deleteBtn" hidden style="margin-top:10px;">Löschen</button>
-  </div>
-</div>
+<!-- The delay entry sheet is built and owned by js/entry-sheet.js, which both
+     pages share -- there is deliberately no markup for it here. -->
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

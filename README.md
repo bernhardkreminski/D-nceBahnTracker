@@ -31,7 +31,18 @@ Lists RE5 and RB54 departures on all four connections within ±2 hours of the
 current time, with live delay information. Tapping a train opens a sheet to log the
 delay: arrival delay (stepper plus one-tap quick picks), optional departure
 delay, a cancellation flag and a note. Entries are saved immediately and
-already-logged trains are marked in the list.
+already-logged trains are marked in the list; tapping a marked train reopens the
+same sheet on the stored values, so a delay can be corrected or removed.
+
+A forgotten trip can be logged after the fact via *Frühere Fahrt nachtragen* at
+the bottom of the list — deliberately understated, since it is the rare case.
+It anchors the list to a chosen date and time and shows the same ±2 hour window
+around it; *Jetzt* returns to the live view. The anchor is transient and a reload
+lands back on now. Auto-refresh pauses while the list is anchored, and the
+departure-board source is skipped, because it only ever serves today's board (see
+`useDepartureBoard` in [js/api.js](js/api.js)). How far back real timetable data
+still exists is up to transitous; beyond that the offline timetable stands in and
+the page says so.
 
 **`stats.html` — Statistik**
 Evaluates the logged trips. Configurable by grouping (day / week / month /
@@ -40,8 +51,10 @@ every setting is remembered. Shows KPIs (average and median delay, total lost
 time, punctuality rate by DB's <5 min definition, worst single delay, actual vs.
 scheduled travel time, extra time on board, cancellations), a per-period trend
 chart, a delay histogram, a breakdown by direction, a ranking of the connections
-that are late most often, and the individual trips. Data can be exported,
-imported and deleted.
+that are late most often, and the individual trips. Every row under *Einzelne
+Fahrten* has ✎ and ✕: ✎ opens the same delay sheet the tracker uses, which is how
+a trip that has long left the live ±2 hour window stays editable. Data can be
+exported, imported and deleted.
 
 ## Data sources
 
@@ -121,9 +134,9 @@ exponentially to a maximum of 30 minutes, so a device that is simply offline
 stops retrying pointlessly; one success — or the `online` event — resets it
 immediately. While `navigator.onLine` is false no request is attempted at all.
 
-When a round pulls in something new, the open page re-renders itself. The
-tracker deliberately holds that redraw back while the delay sheet is open, so a
-background sync can never move the form under you mid-edit.
+When a round pulls in something new, the open page re-renders itself. Both pages
+deliberately hold that redraw back while the delay sheet is open, so a background
+sync can never move the form under you mid-edit.
 
 ### Enabling sync
 
@@ -207,6 +220,7 @@ python3 -m http.server 8000
 | --- | --- |
 | `index.html`, `js/tracker.js` | Tracker page |
 | `stats.html`, `js/stats.js` | Statistics page |
+| `js/entry-sheet.js` | The delay sheet, opened from both pages (owns its own markup) |
 | `js/api.js` | Live data with the three-tier fallback |
 | `js/timetable.js` | Offline fallback timetable |
 | `js/model.js` | Shared `Train`/`Entry` shapes and derived metrics |

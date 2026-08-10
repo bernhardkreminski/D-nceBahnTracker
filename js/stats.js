@@ -14,6 +14,7 @@ import {
   delaySeverity,
 } from './model.js';
 import { listEntries, deleteEntry, clearAll, exportJSON, importJSON } from './storage.js';
+import { openEntrySheet, isEntrySheetOpen } from './entry-sheet.js';
 import {
   isSupabaseConfigured,
   getSession,
@@ -647,14 +648,24 @@ function renderTripsTable(entries) {
       ? el('span', { className: 'badge badge--bad', text: 'Ausfall' })
       : el('span', { className: `badge badge--${delaySeverity(lostTimeMin(e))}`, text: formatDelay(lostTimeMin(e)) });
 
-    const delBtn = el('button', {
-      className: 'icon-btn',
-      text: '✕',
-      attrs: { type: 'button', 'aria-label': 'Fahrt löschen', title: 'Fahrt löschen' },
+    // A stored Entry carries every field the sheet needs, so a trip stays
+    // editable here long after it has dropped out of the tracker's live window.
+    const editBtn = rowButton('✎', 'Verspätung ändern');
+    editBtn.addEventListener('click', () => {
+      openEntrySheet({
+        train: e,
+        onSaved: (_entry, { wasExisting }) => {
+          toast(wasExisting ? 'Fahrt aktualisiert' : 'Fahrt gespeichert');
+          render();
+        },
+        onDeleted: () => {
+          toast('Fahrt gelöscht');
+          render();
+        },
+      });
     });
-    delBtn.style.height = '30px';
-    delBtn.style.minWidth = '30px';
-    delBtn.style.padding = '0';
+
+    const delBtn = rowButton('✕', 'Fahrt löschen');
     delBtn.addEventListener('click', () => {
       if (window.confirm(`Fahrt ${e.line} ${e.trainNumber} vom ${dateText} wirklich löschen?`)) {
         deleteEntry(e.id);
@@ -679,10 +690,19 @@ function renderTripsTable(entries) {
         el('td', { className: 'num' }, [delayCell]),
         el('td', { className: 'num', text: e.cancelled ? '–' : formatMinutes(actualDurationMin(e)) }),
         noteCell,
-        el('td', {}, [delBtn]),
+        el('td', {}, [el('div', { className: 'row-actions' }, [editBtn, delBtn])]),
       ])
     );
   }
+}
+
+/** A compact icon button sized for a table cell. */
+function rowButton(glyph, label) {
+  return el('button', {
+    className: 'icon-btn icon-btn--sm',
+    text: glyph,
+    attrs: { type: 'button', 'aria-label': label, title: label },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -910,10 +930,12 @@ function init() {
   // Trips logged on another device should turn up here on their own.
   startAutoSync();
   onSyncStateChange((event) => {
-    if (event.status === 'ok') {
-      if (event.result?.changed) render(); // pulled something in -- redraw everything
-      else renderSyncCard(); // otherwise just refresh the "last sync" line
-    }
+    if (event.status !== 'ok') return;
+    // Re-rendering the trips table would rebuild the row the sheet was opened
+    // from; the sheet holds its own copy of the entry, but the redraw is
+    // pointless mid-edit and the save that follows triggers one anyway.
+    if (event.result?.changed && !isEntrySheetOpen()) render();
+    else renderSyncCard(); // otherwise just refresh the "last sync" line
   });
   render();
 }

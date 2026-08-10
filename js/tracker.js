@@ -1,24 +1,32 @@
 // Page 1: the delay tracker. Fetches live trains, lets the user log a delay
-// per train via the bottom sheet, and persists it with js/storage.js.
+// per train via the shared bottom sheet (js/entry-sheet.js), and persists it
+// with js/storage.js.
+//
+// The list normally sits on "now", but it can be anchored to a past date/time so
+// a forgotten trip can be logged after the fact -- see the anchor section below.
 
 import { fetchTrains } from './api.js';
-import { DIRECTIONS, DIRECTION_IDS, directionMatches } from './config.js';
+import { DIRECTIONS, DIRECTION_IDS, directionMatches, WINDOW_HOURS } from './config.js';
 import {
   toHHMM,
   actualArrival,
-  actualDurationMin,
-  extraTimeInTrainMin,
-  entryFromTrain,
+  toServiceDate,
   formatMinutes,
   formatDelay,
   delaySeverity,
+  MS_MIN,
 } from './model.js';
-import { getEntry, saveEntry, deleteEntry } from './storage.js';
-import { syncInBackground, startAutoSync, onSyncStateChange } from './sync.js';
+import { getEntry } from './storage.js';
+import { startAutoSync, onSyncStateChange } from './sync.js';
+import { openEntrySheet, isEntrySheetOpen } from './entry-sheet.js';
 import { initAuthGate } from './auth-gate.js';
 
-const QUICK_PICKS = [0, 2, 5, 10, 15, 20, 30, 45, 60];
 const REFRESH_MS = 60000;
+
+// How far back the date picker will go. Long enough to catch up on a holiday's
+// worth of forgotten trips, short enough that the picker cannot be pointed at a
+// date no timetable source could possibly still answer for.
+const MAX_BACKDATE_DAYS = 400;
 
 // ---------------------------------------------------------------------------
 // Preferences (persisted): which axis/hub the train list is filtered to.
@@ -58,36 +66,22 @@ const els = {
   refreshBtn: document.getElementById('refreshBtn'),
   directionControl: document.getElementById('directionControl'),
   hubControl: document.getElementById('hubControl'),
+  anchorBar: document.getElementById('anchorBar'),
+  anchorText: document.getElementById('anchorText'),
+  anchorResetBtn: document.getElementById('anchorResetBtn'),
   notice: document.getElementById('notice'),
   noticeText: document.getElementById('noticeText'),
   skeletonWrap: document.getElementById('skeletonWrap'),
   emptyState: document.getElementById('emptyState'),
+  emptyText: document.getElementById('emptyText'),
   listRoot: document.getElementById('trainListRoot'),
 
-  sheet: document.getElementById('entrySheet'),
-  sheetBackdrop: document.getElementById('sheetBackdrop'),
-  sheetPanel: document.getElementById('sheetPanel'),
-  sheetTitle: document.getElementById('sheetTitle'),
-  sheetSub: document.getElementById('sheetSub'),
-
-  arrInput: document.getElementById('arrInput'),
-  arrMinus: document.getElementById('arrMinus'),
-  arrPlus: document.getElementById('arrPlus'),
-  arrChips: document.getElementById('arrChips'),
-
-  detailsToggle: document.getElementById('detailsToggle'),
-  departureField: document.getElementById('departureField'),
-  depInput: document.getElementById('depInput'),
-  depMinus: document.getElementById('depMinus'),
-  depPlus: document.getElementById('depPlus'),
-
-  cancelledCheckbox: document.getElementById('cancelledCheckbox'),
-  noteTextarea: document.getElementById('noteTextarea'),
-  previewText: document.getElementById('previewText'),
-
-  cancelBtn: document.getElementById('cancelBtn'),
-  saveBtn: document.getElementById('saveBtn'),
-  deleteBtn: document.getElementById('deleteBtn'),
+  pastToggle: document.getElementById('pastToggle'),
+  pastPanel: document.getElementById('pastPanel'),
+  pastDate: document.getElementById('pastDate'),
+  pastTime: document.getElementById('pastTime'),
+  pastShowBtn: document.getElementById('pastShowBtn'),
+  pastCancelBtn: document.getElementById('pastCancelBtn'),
 
   toast: document.getElementById('toast'),
 };
@@ -99,31 +93,34 @@ const state = {
   error: null,
   fetchedAt: null,
   loading: true,
-  sheetOpen: false,
-};
-
-const sheet = {
-  train: null,
-  hasExisting: false,
+  // When set, the list shows the window around this moment instead of "now".
+  // Transient by design: a reload always lands back on the live view.
+  anchor: null,
 };
 
 let toastTimer = null;
 let refreshTimer = null;
+
+/** The moment the list is centred on -- the anchor if one is set, else now. */
+function referenceTime() {
+  return state.anchor ? state.anchor.getTime() : Date.now();
+}
 
 // The page stays locked until a session exists; init() runs once, on unlock.
 initAuthGate({ onSignedIn: init });
 
 async function init() {
   wireStaticEvents();
-  buildQuickPickChips();
   await loadTrains();
 
+  // A back-dated view is a fixed snapshot -- polling it would only re-fetch the
+  // same past window, so the auto-refresh pauses until the user returns to now.
   refreshTimer = setInterval(() => {
-    if (!state.sheetOpen) loadTrains();
+    if (!isEntrySheetOpen() && !state.anchor) loadTrains();
   }, REFRESH_MS);
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !state.sheetOpen) loadTrains();
+    if (document.visibilityState === 'visible' && !isEntrySheetOpen() && !state.anchor) loadTrains();
   });
 
   // Trips logged on another device should turn up here on their own.
@@ -131,7 +128,7 @@ async function init() {
   onSyncStateChange((event) => {
     // Only when the merge actually brought something in, and never while the
     // user is mid-edit in the sheet.
-    if (event.status === 'ok' && event.result?.changed && !state.sheetOpen) render();
+    if (event.status === 'ok' && event.result?.changed && !isEntrySheetOpen()) render();
   });
 }
 
@@ -142,22 +139,34 @@ async function init() {
 async function loadTrains() {
   state.loading = true;
   render();
+  // The user can switch to another date -- or back to now -- while this is in
+  // flight. Everything below is discarded if that happened, so a slow response
+  // for the old view cannot overwrite the newer one (including its loading flag).
+  const anchor = state.anchor;
   try {
-    const result = await fetchTrains();
+    // dbf only ever serves today's live board, so it must not be consulted for a
+    // back-dated window -- see the note on fetchTrains().
+    const result = await fetchTrains(
+      anchor ? { now: anchor, useDepartureBoard: false } : {}
+    );
+    if (state.anchor !== anchor) return;
     state.trains = Array.isArray(result?.trains) ? result.trains : [];
     state.source = result?.source ?? null;
     state.degraded = Boolean(result?.degraded);
     state.error = result?.error ?? null;
     state.fetchedAt = result?.fetchedAt ?? new Date().toISOString();
   } catch (err) {
+    if (state.anchor !== anchor) return;
     console.error('[tracker] fetchTrains failed', err);
     state.trains = [];
     state.degraded = true;
     state.error = 'Live-Daten konnten nicht geladen werden.';
     state.fetchedAt = new Date().toISOString();
   } finally {
-    state.loading = false;
-    render();
+    if (state.anchor === anchor) {
+      state.loading = false;
+      render();
+    }
   }
 }
 
@@ -166,12 +175,31 @@ async function loadTrains() {
 // ---------------------------------------------------------------------------
 
 function render() {
+  renderAnchorBar();
   renderFreshness();
   renderNotice();
   renderList();
 }
 
+/** "Fr., 07.08.2026" -- the long form, used where the date is the whole point. */
+function formatAnchorDate(date) {
+  return date.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function renderAnchorBar() {
+  if (!state.anchor) {
+    els.anchorBar.hidden = true;
+    return;
+  }
+  els.anchorText.textContent = `Nachtragen: ${formatAnchorDate(state.anchor)}, ${toHHMM(state.anchor)}`;
+  els.anchorBar.hidden = false;
+}
+
 function renderFreshness() {
+  if (state.anchor) {
+    els.freshness.textContent = `Rückblick · ${formatAnchorDate(state.anchor)}`;
+    return;
+  }
   if (state.loading && !state.fetchedAt) {
     els.freshness.textContent = 'wird geladen…';
     return;
@@ -186,12 +214,27 @@ function renderFreshness() {
   els.freshness.textContent = parts.length ? parts.join(' · ') : ' ';
 }
 
+function noticeMessage() {
+  // Anchored on a past date, "Live-Fahrplandaten nicht verfügbar" (api.js's
+  // wording for the live view) reads as a fault. It usually is not one -- the
+  // journey planner simply does not keep itineraries for that day any more --
+  // so name the actual consequence instead.
+  if (state.anchor && state.source === 'static') {
+    return (
+      'Für dieses Datum liegen keine Fahrplandaten mehr vor. Angezeigt wird der ' +
+      'hinterlegte Ersatzfahrplan – Zeiten können von der tatsächlichen Fahrt abweichen.'
+    );
+  }
+  return state.degraded && state.error ? state.error : null;
+}
+
 function renderNotice() {
+  const message = noticeMessage();
   // Note: .notice sets `display: flex` in app.css, which (per the cascade)
   // overrides the UA default `[hidden] { display: none }`, so the `hidden`
   // attribute alone would not visually hide it -- toggle inline style too.
-  if (state.degraded && state.error) {
-    els.noticeText.textContent = state.error;
+  if (message) {
+    els.noticeText.textContent = message;
     els.notice.hidden = false;
     els.notice.style.display = '';
   } else {
@@ -211,15 +254,23 @@ function renderList() {
   els.skeletonWrap.hidden = !showSkeleton;
   els.emptyState.hidden = showSkeleton || filtered.length > 0;
   els.listRoot.hidden = showSkeleton;
+  els.emptyText.textContent = state.anchor
+    ? `Für ${formatAnchorDate(state.anchor)} liegen um diese Uhrzeit keine Züge vor. `
+      + 'Wähl eine andere Uhrzeit oder ein anderes Datum.'
+    : 'Aktuell liegen keine Züge innerhalb der nächsten bzw. letzten 2 Stunden vor. '
+      + 'Zieh zum Aktualisieren oder komm später wieder.';
 
   els.listRoot.replaceChildren();
   if (showSkeleton || filtered.length === 0) return;
 
-  const now = Date.now();
+  // Dimming "past" departures is relative to whatever the list is centred on,
+  // so an anchored view greys out the trains before the chosen time rather than
+  // the whole list.
+  const reference = referenceTime();
   for (const dirId of DIRECTION_IDS) {
     const groupTrains = filtered.filter((t) => t.direction === dirId);
     if (groupTrains.length === 0) continue;
-    els.listRoot.appendChild(buildGroup(dirId, groupTrains, now));
+    els.listRoot.appendChild(buildGroup(dirId, groupTrains, reference));
   }
 }
 
@@ -334,137 +385,107 @@ function buildTrainItem(train, now) {
 }
 
 // ---------------------------------------------------------------------------
-// Sheet
+// Sheet (markup + behaviour live in js/entry-sheet.js, shared with the stats page)
 // ---------------------------------------------------------------------------
 
-function buildQuickPickChips() {
-  els.arrChips.replaceChildren();
-  for (const value of QUICK_PICKS) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip';
-    chip.dataset.value = String(value);
-    chip.textContent = value === 0 ? 'pünktlich' : `+${value}`;
-    chip.addEventListener('click', () => {
-      els.arrInput.value = String(value);
-      updateChipActiveState();
-      updatePreview();
-    });
-    els.arrChips.appendChild(chip);
-  }
-}
-
-function updateChipActiveState() {
-  const current = Number(els.arrInput.value) || 0;
-  for (const chip of els.arrChips.children) {
-    chip.classList.toggle('is-active', Number(chip.dataset.value) === current);
-  }
-}
-
 function openSheet(train) {
-  sheet.train = train;
-  const existing = getEntry(train.id);
-  sheet.hasExisting = Boolean(existing);
-
-  els.sheetTitle.textContent = `${train.line} ${train.trainNumber}`.trim();
-  els.sheetSub.textContent =
-    `${DIRECTIONS[train.direction].label} · ${toHHMM(train.scheduledDeparture)} → ${toHHMM(train.scheduledArrival)}`;
-
-  const defaultArrival = existing ? existing.arrivalDelayMin : (train.arrivalDelayMin ?? 0);
-  const defaultDeparture = existing ? existing.departureDelayMin : (train.departureDelayMin ?? 0);
-  const defaultCancelled = existing ? existing.cancelled : Boolean(train.cancelled);
-  const defaultNote = existing ? existing.note : '';
-
-  els.arrInput.value = String(Math.round(defaultArrival) || 0);
-  els.depInput.value = String(Math.round(defaultDeparture) || 0);
-  els.cancelledCheckbox.checked = defaultCancelled;
-  els.noteTextarea.value = defaultNote || '';
-  // .btn--block sets `display: block`, which likewise overrides the UA
-  // `[hidden]` default -- toggle inline style alongside the attribute.
-  els.deleteBtn.hidden = !existing;
-  els.deleteBtn.style.display = existing ? '' : 'none';
-
-  // Reveal the details section automatically if there is a non-zero
-  // departure delay to show, otherwise keep it collapsed.
-  const showDetails = Number(els.depInput.value) !== 0;
-  els.departureField.hidden = !showDetails;
-  els.detailsToggle.setAttribute('aria-expanded', String(showDetails));
-
-  updateChipActiveState();
-  updatePreview();
-
-  els.sheet.hidden = false;
-  state.sheetOpen = true;
-  document.body.style.overflow = 'hidden';
-  document.addEventListener('keydown', onSheetKeydown);
-  els.sheetPanel.focus();
+  openEntrySheet({
+    train,
+    onSaved: (_entry, { wasExisting }) => {
+      showToast(wasExisting ? 'Aktualisiert' : 'Gespeichert');
+      render();
+    },
+    onDeleted: () => {
+      showToast('Gelöscht');
+      render();
+    },
+  });
 }
 
-function closeSheet() {
-  els.sheet.hidden = true;
-  state.sheetOpen = false;
-  document.body.style.overflow = '';
-  document.removeEventListener('keydown', onSheetKeydown);
-  sheet.train = null;
-  sheet.hasExisting = false;
+// ---------------------------------------------------------------------------
+// Back-dated lookup ("Frühere Fahrt nachtragen")
+// ---------------------------------------------------------------------------
+
+/** Local "HH:MM" rounded down to the nearest five minutes, for the time input. */
+function toStepValue(date) {
+  const d = new Date(date);
+  d.setMinutes(Math.floor(d.getMinutes() / 5) * 5, 0, 0);
+  return toHHMM(d);
 }
 
-function onSheetKeydown(event) {
-  if (event.key === 'Escape') closeSheet();
+function setPastPanelOpen(open) {
+  els.pastPanel.hidden = !open;
+  els.pastToggle.setAttribute('aria-expanded', String(open));
+  if (!open) return;
+
+  // Seed with whatever the list currently shows, so reopening the panel to
+  // nudge the time by an hour does not mean re-entering the date as well.
+  const seed = state.anchor ?? new Date();
+  els.pastDate.value = toServiceDate(seed);
+  els.pastTime.value = toStepValue(seed);
+  els.pastPanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  els.pastDate.focus();
 }
 
-function currentFormValues() {
-  return {
-    departureDelayMin: Number(els.depInput.value) || 0,
-    arrivalDelayMin: Number(els.arrInput.value) || 0,
-    cancelled: els.cancelledCheckbox.checked,
-    note: els.noteTextarea.value,
-  };
+/** Read the two inputs into one local Date, or null if they are not usable. */
+function readPastInputs() {
+  const [y, m, d] = (els.pastDate.value || '').split('-').map(Number);
+  const [hh, mm] = (els.pastTime.value || '').split(':').map(Number);
+  if (!y || !m || !d || !Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  return new Date(y, m - 1, d, hh, mm, 0, 0);
 }
 
-function updatePreview() {
-  const train = sheet.train;
-  if (!train) return;
-  const values = currentFormValues();
-
-  if (values.cancelled) {
-    els.previewText.textContent = 'Zug fällt aus – keine Ankunft erfasst.';
-    return;
-  }
-
-  const merged = { ...train, ...values };
-  const arrival = actualArrival(merged);
-  const duration = actualDurationMin(merged);
-  const extra = extraTimeInTrainMin(merged);
-
-  let extraText;
-  if (extra > 0) extraText = `${formatMinutes(extra)} länger im Zug als geplant`;
-  else if (extra < 0) extraText = `${formatMinutes(Math.abs(extra))} kürzer im Zug als geplant`;
-  else extraText = 'Fahrzeit wie geplant';
-
-  els.previewText.textContent = `Ankunft ca. ${toHHMM(arrival)} · ${formatMinutes(duration)} im Zug (${extraText})`;
+function applyAnchor(date) {
+  state.anchor = date;
+  state.trains = [];
+  state.source = null;
+  state.degraded = false;
+  state.error = null;
+  setPastPanelOpen(false);
+  loadTrains();
 }
 
-function handleSave() {
-  const train = sheet.train;
-  if (!train) return;
-  const values = currentFormValues();
-  const entry = entryFromTrain(train, values);
-  saveEntry(entry);
-  closeSheet();
-  showToast('Gespeichert');
-  render();
-  syncInBackground(); // fire-and-forget: saving must never wait on the network
+function clearAnchor() {
+  if (!state.anchor) return;
+  state.anchor = null;
+  state.trains = [];
+  state.source = null;
+  state.degraded = false;
+  state.error = null;
+  loadTrains();
 }
 
-function handleDelete() {
-  const train = sheet.train;
-  if (!train) return;
-  deleteEntry(train.id);
-  closeSheet();
-  showToast('Gelöscht');
-  render();
-  syncInBackground();
+function wirePastLookup() {
+  // The date input caps itself at today: the live list already covers the next
+  // two hours, and anything beyond that has no delay to log yet.
+  const today = new Date();
+  const earliest = new Date(today.getFullYear(), today.getMonth(), today.getDate() - MAX_BACKDATE_DAYS);
+  els.pastDate.max = toServiceDate(today);
+  els.pastDate.min = toServiceDate(earliest);
+
+  els.pastToggle.addEventListener('click', () => setPastPanelOpen(els.pastPanel.hidden));
+  els.pastCancelBtn.addEventListener('click', () => setPastPanelOpen(false));
+  els.anchorResetBtn.addEventListener('click', clearAnchor);
+
+  els.pastShowBtn.addEventListener('click', () => {
+    const picked = readPastInputs();
+    if (!picked) {
+      showToast('Bitte Datum und Uhrzeit angeben');
+      return;
+    }
+    if (picked.getTime() < earliest.getTime()) {
+      showToast(`Nur bis ${formatAnchorDate(earliest)} zurück möglich`);
+      return;
+    }
+    // Anything at or after "now" is just the live view -- no anchor needed, and
+    // pinning one would only freeze the auto-refresh for no reason.
+    if (picked.getTime() >= Date.now() - WINDOW_HOURS * 60 * MS_MIN) {
+      setPastPanelOpen(false);
+      clearAnchor();
+      return;
+    }
+    applyAnchor(picked);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -520,34 +541,5 @@ function wireStaticEvents() {
     if (train) openSheet(train);
   });
 
-  els.sheetBackdrop.addEventListener('click', closeSheet);
-  els.cancelBtn.addEventListener('click', closeSheet);
-  els.saveBtn.addEventListener('click', handleSave);
-  els.deleteBtn.addEventListener('click', handleDelete);
-
-  els.detailsToggle.addEventListener('click', () => {
-    const expanded = !els.departureField.hidden;
-    els.departureField.hidden = expanded;
-    els.detailsToggle.setAttribute('aria-expanded', String(!expanded));
-  });
-
-  els.arrMinus.addEventListener('click', () => stepInput(els.arrInput, -1));
-  els.arrPlus.addEventListener('click', () => stepInput(els.arrInput, 1));
-  els.depMinus.addEventListener('click', () => stepInput(els.depInput, -1));
-  els.depPlus.addEventListener('click', () => stepInput(els.depInput, 1));
-
-  els.arrInput.addEventListener('input', () => {
-    updateChipActiveState();
-    updatePreview();
-  });
-  els.depInput.addEventListener('input', updatePreview);
-  els.cancelledCheckbox.addEventListener('change', updatePreview);
-  els.noteTextarea.addEventListener('input', updatePreview);
-}
-
-function stepInput(input, delta) {
-  const next = (Number(input.value) || 0) + delta;
-  input.value = String(next);
-  if (input === els.arrInput) updateChipActiveState();
-  updatePreview();
+  wirePastLookup();
 }
