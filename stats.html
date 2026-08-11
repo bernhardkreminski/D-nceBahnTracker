@@ -59,6 +59,11 @@
 
   <div id="statsContent">
 
+    <!-- Says which filters are hiding logged trips. Built by renderFilterNotice
+         in js/stats.js; the filters persist across sessions, so without this a
+         trip logged today can silently not appear at all. -->
+    <div id="filterNotice" hidden></div>
+
     <section class="section" id="controlsSection">
       <div class="section-title">Zeitraum &amp; Gruppierung</div>
       <div class="card card-pad" style="display:flex; flex-direction:column; gap:14px;">
@@ -180,11 +185,11 @@
             <tbody id="tripsTableBody"></tbody>
           </table>
         </div>
+        <!-- Deliberately does not blame the Zeitraum: the direction, station and
+             cancellation filters hide trips too, and #filterNotice names which. -->
         <p class="hint card-pad" id="tripsEmptyHint" style="margin:0; display:none;">
-          Keine Fahrten im gewählten Zeitraum.
+          Keine Fahrten, auf die die aktuellen Filter passen.
         </p>
-        <!-- Shown when the range is hiding logged trips; see renderOutOfRangeHint. -->
-        <p class="hint card-pad" id="outOfRangeHint" style="margin:0;" hidden></p>
       </div>
     </section>
 

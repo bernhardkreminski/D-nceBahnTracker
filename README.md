@@ -56,6 +56,13 @@ Fahrten* has ✎ and ✕: ✎ opens the same delay sheet the tracker uses, which
 a trip that has long left the live ±2 hour window stays editable. Data can be
 exported, imported and deleted.
 
+Every filter on this page is **remembered across sessions**, which is a trap
+worth knowing about: a *Richtung* or *Bahnhof* chosen weeks ago still applies, so
+a trip logged today can be stored and synced and still not appear here. Whenever
+the filters hide logged trips the page now says so at the top — how many, which
+filter is responsible, and a *Filter zurücksetzen* button. Keep that notice
+working; without it this reads exactly like data loss.
+
 ## Data sources
 
 Live timetable and real-time data is fetched client-side, with a three-tier

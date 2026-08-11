@@ -298,7 +298,7 @@ function cacheEls() {
     'appbarSub', 'emptySection', 'statsContent', 'kpiGrid',
     'chartTitle', 'periodChart', 'periodChartHint', 'histogramChart',
     'directionChart', 'worstTableBody', 'worstHint', 'tripsTableBody',
-    'tripsEmptyHint', 'outOfRangeHint', 'cancelledHint', 'dataHint', 'importFile',
+    'tripsEmptyHint', 'filterNotice', 'cancelledHint', 'dataHint', 'importFile',
     'syncSection', 'syncCard',
   ];
   for (const id of ids) els[id] = document.getElementById(id);
@@ -380,7 +380,7 @@ function render() {
   renderDirectionChart(rangeFiltered);
   renderWorstTrains(statsFiltered);
   renderTripsTable(statsFiltered);
-  renderOutOfRangeHint(all.length - rangeFiltered.length);
+  renderFilterNotice({ all, rangeFiltered, directionFiltered, statsFiltered, rangeOpt });
 
   els.cancelledHint.textContent =
     prefs.cancelledMode === 'include'
@@ -702,21 +702,62 @@ function renderTripsTable(entries) {
   }
 }
 
+/** Restore just the filters, leaving grouping and chart metric alone. */
+function resetFilters() {
+  prefs = { ...prefs, range: 'all', axis: 'ALL', hub: 'ALL', cancelledMode: 'include' };
+  savePrefs(prefs);
+  render();
+}
+
 /**
- * Say so when the selected range is hiding trips. A trip logged via "Frühere
- * Fahrt nachtragen" can be older than the default „Letzte 30 Tage", and it is
- * not in the tracker's live window either -- without this it is stored and
- * synced but visible nowhere, which reads exactly like it was never saved.
+ * Name the filters that are hiding logged trips.
+ *
+ * Every filter here is persisted, so a Richtung or Bahnhof chosen weeks ago is
+ * still applied on the next visit. A trip logged today then simply does not
+ * appear, and the page used to offer no explanation beyond "Keine Fahrten im
+ * gewählten Zeitraum" -- which is wrong whenever the range is not the cause.
+ * When the filters hide *everything*, this is a full warning notice; when they
+ * hide only some of the trips it stays a quiet hint.
  */
-function renderOutOfRangeHint(hiddenCount) {
-  const node = els.outOfRangeHint;
-  if (!hiddenCount) {
+function renderFilterNotice({ all, rangeFiltered, directionFiltered, statsFiltered, rangeOpt }) {
+  const node = els.filterNotice;
+  clear(node);
+
+  const hidden = all.length - statsFiltered.length;
+  if (hidden <= 0) {
     node.hidden = true;
     return;
   }
-  node.textContent = hiddenCount === 1
-    ? 'Eine weitere erfasste Fahrt liegt außerhalb des gewählten Zeitraums. Wähl „Gesamt", um sie zu sehen.'
-    : `${hiddenCount} weitere erfasste Fahrten liegen außerhalb des gewählten Zeitraums. Wähl „Gesamt", um sie zu sehen.`;
+
+  const byRange = all.length - rangeFiltered.length;
+  const byDirection = rangeFiltered.length - directionFiltered.length;
+  const byCancelled = directionFiltered.length - statsFiltered.length;
+
+  const reasons = [];
+  if (byRange) reasons.push(`${byRange} außerhalb von „${rangeOpt.label}"`);
+  if (byDirection) reasons.push(`${byDirection} durch „Richtung"/„Bahnhof"`);
+  if (byCancelled) reasons.push(`${byCancelled} als ausgefallen ausgeblendet`);
+
+  const nothingLeft = statsFiltered.length === 0;
+  const lead = nothingLeft
+    ? `Alle ${all.length} erfassten Fahrten sind aktuell ausgeblendet`
+    : `${hidden} von ${all.length} erfassten Fahrten sind ausgeblendet`;
+
+  const reset = el('button', {
+    className: 'btn btn--ghost',
+    text: 'Filter zurücksetzen',
+    attrs: { type: 'button' },
+  });
+  reset.style.flex = '0 0 auto';
+  reset.style.padding = '6px 12px';
+  reset.style.fontSize = '13px';
+  reset.addEventListener('click', resetFilters);
+
+  // Two skins, one layout: the warning colours when nothing is left to show,
+  // the quiet bar when it is only trimming the set.
+  node.className = nothingLeft ? 'notice filter-notice' : 'anchor-bar filter-notice';
+  node.appendChild(el('span', { text: `${lead}: ${reasons.join(', ')}.` }));
+  node.appendChild(reset);
   node.hidden = false;
 }
 

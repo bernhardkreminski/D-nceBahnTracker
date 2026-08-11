@@ -430,6 +430,19 @@ body {
   margin-bottom: 12px;
 }
 
+/* Text plus a reset action. Sits over either the .notice or the .anchor-bar
+   skin, so it only has to fix the layout the two do not share. */
+.filter-notice {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  /* On a narrow phone the reset button drops to its own line rather than
+     squeezing the explanation into a two-word column. */
+  flex-wrap: wrap;
+}
+
+.filter-notice > span { flex: 1 1 14rem; }
+
 .anchor-bar-btn {
   flex: 0 0 auto;
   padding: 6px 12px;
