@@ -391,14 +391,21 @@ function buildTrainItem(train, now) {
 function openSheet(train) {
   openEntrySheet({
     train,
-    onSaved: (_entry, { wasExisting }) => {
-      showToast(wasExisting ? 'Aktualisiert' : 'Gespeichert');
+    onSaved: (entry, { wasExisting }) => {
+      const verb = wasExisting ? 'Aktualisiert' : 'Gespeichert';
+      // A back-dated trip disappears from the live list the moment you return to
+      // "Jetzt", so name the day it was filed under rather than just "saved".
+      const day = entry.serviceDate === toServiceDate(new Date())
+        ? null
+        : formatAnchorDate(new Date(entry.scheduledDeparture));
+      showToast(day ? `${verb}: ${day}` : verb);
       render();
     },
     onDeleted: () => {
       showToast('Gelöscht');
       render();
     },
+    onError: (err) => showToast(err.message),
   });
 }
 

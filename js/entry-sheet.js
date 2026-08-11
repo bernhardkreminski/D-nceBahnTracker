@@ -29,6 +29,7 @@ const session = {
   wasExisting: false,
   onSaved: null,
   onDeleted: null,
+  onError: null,
 };
 
 let isOpen = false;
@@ -225,8 +226,9 @@ function dayLabel(iso) {
  * @param {import('./model.js').Train} options.train  train or stored Entry to edit
  * @param {(entry: import('./model.js').Entry, info: {wasExisting: boolean}) => void} [options.onSaved]
  * @param {(id: string) => void} [options.onDeleted]
+ * @param {(error: Error) => void} [options.onError] storing failed; the sheet stays open
  */
-export function openEntrySheet({ train, onSaved = null, onDeleted = null }) {
+export function openEntrySheet({ train, onSaved = null, onDeleted = null, onError = null }) {
   if (!train) return;
   if (!els) build();
 
@@ -236,6 +238,7 @@ export function openEntrySheet({ train, onSaved = null, onDeleted = null }) {
   session.wasExisting = Boolean(existing);
   session.onSaved = onSaved;
   session.onDeleted = onDeleted;
+  session.onError = onError;
 
   els.title.textContent = `${train.line} ${train.trainNumber}`.trim();
   els.sub.textContent = [
@@ -280,6 +283,7 @@ export function closeEntrySheet() {
   session.wasExisting = false;
   session.onSaved = null;
   session.onDeleted = null;
+  session.onError = null;
 }
 
 /** True while the sheet is up -- pages use it to hold back background re-renders. */
@@ -330,8 +334,19 @@ function updatePreview() {
 function handleSave() {
   const train = session.train;
   if (!train) return;
-  const { onSaved, wasExisting } = session;
-  const entry = saveEntry(entryFromTrain(train, currentFormValues()));
+  const { onSaved, onError, wasExisting } = session;
+
+  let entry;
+  try {
+    entry = saveEntry(entryFromTrain(train, currentFormValues()));
+  } catch (err) {
+    // Deliberately leave the sheet open: nothing was stored, so closing it would
+    // dress a loss up as a success and discard what the user just typed.
+    console.error('[entry-sheet] could not persist entry', err);
+    if (onError) onError(err);
+    return;
+  }
+
   closeEntrySheet();
   syncInBackground(); // fire-and-forget: saving must never wait on the network
   if (onSaved) onSaved(entry, { wasExisting });
@@ -340,9 +355,17 @@ function handleSave() {
 function handleDelete() {
   const train = session.train;
   if (!train) return;
-  const { onDeleted } = session;
+  const { onDeleted, onError } = session;
   const id = train.id;
-  deleteEntry(id);
+
+  try {
+    deleteEntry(id);
+  } catch (err) {
+    console.error('[entry-sheet] could not delete entry', err);
+    if (onError) onError(err);
+    return;
+  }
+
   closeEntrySheet();
   syncInBackground();
   if (onDeleted) onDeleted(id);

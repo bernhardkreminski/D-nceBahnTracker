@@ -13,7 +13,7 @@ import {
   formatDelay,
   delaySeverity,
 } from './model.js';
-import { listEntries, deleteEntry, clearAll, exportJSON, importJSON } from './storage.js';
+import { listEntries, deleteEntry, clearAll, exportJSON, importJSON, STORAGE_WRITE_ERROR } from './storage.js';
 import { openEntrySheet, isEntrySheetOpen } from './entry-sheet.js';
 import {
   isSupabaseConfigured,
@@ -298,7 +298,7 @@ function cacheEls() {
     'appbarSub', 'emptySection', 'statsContent', 'kpiGrid',
     'chartTitle', 'periodChart', 'periodChartHint', 'histogramChart',
     'directionChart', 'worstTableBody', 'worstHint', 'tripsTableBody',
-    'tripsEmptyHint', 'cancelledHint', 'dataHint', 'importFile',
+    'tripsEmptyHint', 'outOfRangeHint', 'cancelledHint', 'dataHint', 'importFile',
     'syncSection', 'syncCard',
   ];
   for (const id of ids) els[id] = document.getElementById(id);
@@ -380,6 +380,7 @@ function render() {
   renderDirectionChart(rangeFiltered);
   renderWorstTrains(statsFiltered);
   renderTripsTable(statsFiltered);
+  renderOutOfRangeHint(all.length - rangeFiltered.length);
 
   els.cancelledHint.textContent =
     prefs.cancelledMode === 'include'
@@ -662,16 +663,21 @@ function renderTripsTable(entries) {
           toast('Fahrt gelöscht');
           render();
         },
+        onError: (err) => toast(err.message),
       });
     });
 
     const delBtn = rowButton('✕', 'Fahrt löschen');
     delBtn.addEventListener('click', () => {
-      if (window.confirm(`Fahrt ${e.line} ${e.trainNumber} vom ${dateText} wirklich löschen?`)) {
+      if (!window.confirm(`Fahrt ${e.line} ${e.trainNumber} vom ${dateText} wirklich löschen?`)) return;
+      try {
         deleteEntry(e.id);
-        toast('Fahrt gelöscht');
-        render();
+      } catch (err) {
+        toast(err.message);
+        return;
       }
+      toast('Fahrt gelöscht');
+      render();
     });
 
     const noteCell = el('td', { text: e.note || '' });
@@ -694,6 +700,24 @@ function renderTripsTable(entries) {
       ])
     );
   }
+}
+
+/**
+ * Say so when the selected range is hiding trips. A trip logged via "Frühere
+ * Fahrt nachtragen" can be older than the default „Letzte 30 Tage", and it is
+ * not in the tracker's live window either -- without this it is stored and
+ * synced but visible nowhere, which reads exactly like it was never saved.
+ */
+function renderOutOfRangeHint(hiddenCount) {
+  const node = els.outOfRangeHint;
+  if (!hiddenCount) {
+    node.hidden = true;
+    return;
+  }
+  node.textContent = hiddenCount === 1
+    ? 'Eine weitere erfasste Fahrt liegt außerhalb des gewählten Zeitraums. Wähl „Gesamt", um sie zu sehen.'
+    : `${hiddenCount} weitere erfasste Fahrten liegen außerhalb des gewählten Zeitraums. Wähl „Gesamt", um sie zu sehen.`;
+  node.hidden = false;
 }
 
 /** A compact icon button sized for a table cell. */
@@ -884,7 +908,9 @@ function wireDataManagement() {
         toast('Import erfolgreich');
         render();
       } catch (err) {
-        els.dataHint.textContent = 'Import fehlgeschlagen: Datei hat ein unerwartetes Format.';
+        els.dataHint.textContent = err?.name === STORAGE_WRITE_ERROR
+          ? `Import fehlgeschlagen: ${err.message}`
+          : 'Import fehlgeschlagen: Datei hat ein unerwartetes Format.';
         console.error('[stats] import failed', err);
       } finally {
         els.importFile.value = '';
@@ -898,11 +924,15 @@ function wireDataManagement() {
   });
 
   document.getElementById('clearBtn').addEventListener('click', () => {
-    if (window.confirm('Wirklich alle gespeicherten Fahrten löschen? Dies kann nicht rückgängig gemacht werden.')) {
+    if (!window.confirm('Wirklich alle gespeicherten Fahrten löschen? Dies kann nicht rückgängig gemacht werden.')) return;
+    try {
       clearAll();
-      toast('Alle Daten gelöscht');
-      render();
+    } catch (err) {
+      toast(err.message);
+      return;
     }
+    toast('Alle Daten gelöscht');
+    render();
   });
 }
 

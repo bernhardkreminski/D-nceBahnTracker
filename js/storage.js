@@ -18,6 +18,9 @@ const DIRTY_KEY = 'dbt.dirty.v1';
 // the tombstone list cannot grow without bound.
 const TOMBSTONE_TTL_DAYS = 180;
 
+/** `err.name` on every error thrown because localStorage refused a write. */
+export const STORAGE_WRITE_ERROR = 'StorageWriteError';
+
 function readAll() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -40,6 +43,23 @@ function writeAll(map) {
   }
 }
 
+// localStorage can refuse a write -- quota exhausted, or storage blocked for the
+// origin (Safari private windows, "block all cookies", some managed profiles).
+// Callers used to ignore that and report success anyway, so the trip silently
+// existed only in the open page and was gone on the next load. Every write path
+// now goes through this instead, so a refused write reaches the user.
+function writeAllOrThrow(map) {
+  if (writeAll(map)) return;
+  const err = new Error(
+    'Speichern nicht möglich — der Browser-Speicher ist voll oder für diese Seite gesperrt. '
+    + 'Die Fahrt wurde NICHT gespeichert.'
+  );
+  // Named so callers can tell a refused write apart from, say, a malformed
+  // import file and report the right thing.
+  err.name = STORAGE_WRITE_ERROR;
+  throw err;
+}
+
 /** @returns {Record<string, import('./model.js').Entry>} */
 export function loadEntries() {
   return readAll();
@@ -60,7 +80,10 @@ export function hasEntry(id) {
   return Boolean(readAll()[id]);
 }
 
-/** Insert or update. Preserves the original createdAt on update. */
+/**
+ * Insert or update. Preserves the original createdAt on update.
+ * Throws if the write did not land -- never report a save the store refused.
+ */
 export function saveEntry(entry) {
   const map = readAll();
   const existing = map[entry.id];
@@ -69,22 +92,26 @@ export function saveEntry(entry) {
     createdAt: existing?.createdAt || entry.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  writeAll(map);
+  writeAllOrThrow(map);
+  // Only after the entry is safely stored: an id marked dirty for a row that was
+  // never written would make every later sync round push a nonexistent trip.
   markDirty([entry.id]);
   return map[entry.id];
 }
 
+/** Throws if the write did not land. */
 export function deleteEntry(id) {
   const map = readAll();
   delete map[id];
-  writeAll(map);
+  writeAllOrThrow(map);
   recordTombstones([id]);
   markDirty([id]);
 }
 
+/** Throws if the write did not land. */
 export function clearAll() {
   const ids = Object.keys(readAll());
-  writeAll({});
+  writeAllOrThrow({});
   // The deletions still have to reach the server, so tombstone and dirty-mark
   // every removed id rather than silently dropping them.
   recordTombstones(ids);
@@ -108,7 +135,7 @@ export function importJSON(text) {
       imported.push(id);
     }
   }
-  writeAll(map);
+  writeAllOrThrow(map);
   markDirty(imported); // imported trips still have to reach the server
   return imported.length;
 }
@@ -200,8 +227,12 @@ export function markAllDirty() {
 /**
  * Overwrite the whole local state at once. This is the merge write path, so it
  * deliberately does NOT touch the dirty set.
+ *
+ * Throws if the write did not land, which aborts the sync round before it can
+ * clear the dirty set -- otherwise a refused write would mark everything as sent
+ * while the merged state never reached the store, losing the pending trips.
  */
 export function replaceAll(entries, tombstones) {
-  writeAll(entries && typeof entries === 'object' ? entries : {});
+  writeAllOrThrow(entries && typeof entries === 'object' ? entries : {});
   if (tombstones && typeof tombstones === 'object') writeMap(DELETED_KEY, tombstones, 'tombstones');
 }
